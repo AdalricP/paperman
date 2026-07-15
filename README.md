@@ -99,8 +99,9 @@ an empty base, then create a [personal access token](https://airtable.com/create
 restricted to that base with `data.records:write` and `schema.bases:write`.
 Paste the token and either the base URL or its `app…` ID into the Airtable rows
 in Settings. On the first crossed paper, paperman creates a `Reading Notes`
-table with your paper-name, link, usefulness, robotics, note, artifact, and
-improvement columns. Pressing `x` again removes the same Airtable record.
+table and a linked `Pushes` table. Reading Notes has your paper name, link,
+usefulness and robotics checkboxes, key push, and artifact-link columns.
+Pressing `x` again removes the same Airtable record.
 
 The token is a local write credential. Keep it in Settings only and do not
 commit it.

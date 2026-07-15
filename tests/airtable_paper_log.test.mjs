@@ -43,11 +43,9 @@ test("crossed papers are added to the configured Airtable Reading Notes table", 
       fields: {
         "Paper Name": paper.title,
         Link: "https://arxiv.org/pdf/2607.00001",
-        "Useful?": "",
-        "Robotics?": "",
-        "Key Push note link //": "",
-        Artifact: "",
-        "How did I improve upon this": "",
+        "Useful?": false,
+        "Robotics?": false,
+        Artifact: null,
       },
     });
   } finally {
@@ -61,14 +59,18 @@ test("the first crossed paper creates a missing Airtable Reading Notes table", a
   globalThis.fetch = async (requested_url, options) => {
     requests.push({ requested_url, options });
     if (requests.length === 1) return { ok: false, status: 403, text: async () => JSON.stringify({ error: { type: "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message: "Could not find table" } }) };
+    if (requests.length === 2) return { ok: true, json: async () => ({ id: "tblPushes" }) };
+    if (requests.length === 3) return { ok: true };
     return { ok: true, json: async () => ({ id: "recExample" }) };
   };
   try {
     assert.deepEqual(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: airtable_base_id, paper }), { airtable_base_id, airtable_record_id: "recExample" });
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
     assert.equal(requests[1].requested_url, `https://api.airtable.com/v0/meta/bases/${airtable_base_id}/tables`);
-    assert.deepEqual(JSON.parse(requests[1].options.body).name, "Reading Notes");
-    assert.equal(requests[2].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
+    assert.deepEqual(JSON.parse(requests[1].options.body).name, "Pushes");
+    assert.deepEqual(JSON.parse(requests[2].options.body).name, "Reading Notes");
+    assert.deepEqual(JSON.parse(requests[2].options.body).fields.find((field) => field.name === "Key Push"), { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: "tblPushes" } });
+    assert.equal(requests[3].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
   } finally {
     globalThis.fetch = original_fetch;
   }
