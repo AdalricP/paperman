@@ -196,7 +196,7 @@ async function language_model_selection({
       if (attempt_number === 2) {
         return {
           validated_picks: fallback_picks({ pruned_papers, selection_target_by_category_code }),
-          selection_warning: `model pick failed, used local ranking: ${selection_error.message}`,
+          selection_warning: `model pick failed, used recency order: ${selection_error.message}`,
         };
       }
     }

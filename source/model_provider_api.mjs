@@ -14,7 +14,7 @@ async function provider_json_request({ endpoint_url, api_key, request_payload })
   });
   if (!api_response.ok) {
     const error_body_text = await api_response.text();
-    throw new Error(`${endpoint_url} returned ${api_response.status}: ${error_body_text.slice(0, 300)}`);
+    throw new Error(`OpenRouter request failed (HTTP ${api_response.status}): ${error_body_text.slice(0, 300)}`);
   }
   return api_response.json();
 }
