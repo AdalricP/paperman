@@ -3,12 +3,11 @@
 
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { arxiv_category_catalog } from "./source/arxiv_category_catalog.mjs";
 import { fetch_arxiv_papers_for_category } from "./source/arxiv_paper_feed.mjs";
 import { embed_paper_texts, request_daily_pick } from "./source/fireworks_api.mjs";
 import { daily_paper_selection_for_date } from "./source/daily_paper_selection_pipeline.mjs";
 import { google_calendar_event_link, next_full_hour_at_least_minutes_away } from "./source/google_calendar_event_link.mjs";
-import { default_settings, open_paperman_home_files, paperman_home_directory_path } from "./source/paperman_home_files.mjs";
+import { open_paperman_home_files, paperman_home_directory_path } from "./source/paperman_home_files.mjs";
 import {
   arxiv_id_after_selection_move,
   build_paper_list_rows,
@@ -19,6 +18,12 @@ import {
   selected_paper_row_index,
   settings_cursor_index_after_move,
 } from "./source/screen_row_models.mjs";
+import {
+  active_setup_wizard_step,
+  build_setup_wizard_rows,
+  initial_setup_wizard_state,
+  setup_wizard_state_after_key,
+} from "./source/setup_wizard_flow.mjs";
 import {
   text_editor_state_after_key,
   text_editor_state_for,
@@ -49,6 +54,9 @@ const home_files = open_paperman_home_files(paperman_home_directory_path());
 
 const user_interface_state = {
   active_screen: "paper_list",
+  setup_wizard: null,
+  setup_wizard_completion_resolver: null,
+  setup_wizard_scroll_offset: 0,
   settings: home_files.read_settings(),
   daily_selection: null,
   warnings: [],
@@ -131,54 +139,32 @@ function save_settings_changes(settings_changes) {
   user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings);
 }
 
-async function run_first_run_setup_wizard() {
-  const wizard_prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (question_text) => new Promise((resolve_with_answer) => wizard_prompt.question(question_text, resolve_with_answer));
-
-  console.log(`\n📮 paperman setup — saved to ${paperman_home_directory_path()}\n`);
-
-  const api_key_from_environment = process.env.FIREWORKS_API_KEY?.trim();
-  let fireworks_api_key = api_key_from_environment ?? "";
-  if (api_key_from_environment) console.log("Fireworks API key: using FIREWORKS_API_KEY from the environment.\n");
-  while (!fireworks_api_key) {
-    fireworks_api_key = (await ask("Fireworks API key (fireworks.ai → API Keys): ")).trim();
-    if (!fireworks_api_key) console.log("  Required — paperman filters papers with GLM on Fireworks.");
-  }
-
-  console.log("\nCommon arXiv categories:");
-  for (const [catalog_index, catalog_entry] of arxiv_category_catalog.entries()) {
-    console.log(`  ${String(catalog_index + 1).padStart(2)}. ${catalog_entry.arxiv_category_code} — ${catalog_entry.display_name}`);
-  }
-  const default_category_codes = default_settings.tracked_arxiv_category_codes.join(",");
-  const categories_answer = (await ask(`Track (numbers and/or codes, comma-separated) [${default_category_codes}]: `)).trim();
-  const tracked_arxiv_category_codes = tracked_codes_from_wizard_answer(categories_answer);
-
-  const interests_blurb_text = (await ask("\nYour interests (one line, guides the picks, enter to skip): ")).trim();
-  const reading_intent_blurb_text = (await ask("Your current goal (why you read papers, enter to skip): ")).trim();
-  const chat_model_answer = (await ask(`Chat model [${default_settings.fireworks_chat_model_id}]: `)).trim();
-  wizard_prompt.close();
-
-  save_settings_changes({
-    fireworks_api_key,
-    tracked_arxiv_category_codes,
-    interests_blurb_text,
-    reading_intent_blurb_text,
-    fireworks_chat_model_id: chat_model_answer || default_settings.fireworks_chat_model_id,
-    has_completed_first_run_setup: true,
+function completed_setup_wizard() {
+  user_interface_state.setup_wizard = initial_setup_wizard_state({
+    environment_fireworks_api_key: process.env.FIREWORKS_API_KEY?.trim(),
   });
-  console.log("\n✅ Saved. Building today's reading list…\n");
+  user_interface_state.active_screen = "setup_wizard";
+  render();
+  return new Promise((resolve_when_setup_completes) => {
+    user_interface_state.setup_wizard_completion_resolver = resolve_when_setup_completes;
+  });
 }
 
-function tracked_codes_from_wizard_answer(categories_answer) {
-  if (!categories_answer) return default_settings.tracked_arxiv_category_codes;
-  const answer_tokens = categories_answer.split(",").map((answer_token) => answer_token.trim()).filter(Boolean);
-  const category_codes = answer_tokens.map((answer_token) => {
-    const catalog_number = Number(answer_token);
-    const is_catalog_number = Number.isInteger(catalog_number) && catalog_number >= 1 && catalog_number <= arxiv_category_catalog.length;
-    if (is_catalog_number) return arxiv_category_catalog[catalog_number - 1].arxiv_category_code;
-    return answer_token;
+function handle_setup_wizard_key(typed_character, pressed_key) {
+  const wizard_outcome = setup_wizard_state_after_key({
+    wizard_state: user_interface_state.setup_wizard,
+    typed_character,
+    pressed_key,
   });
-  return [...new Set(category_codes)];
+  if (wizard_outcome.kind === "in_progress") {
+    user_interface_state.setup_wizard = wizard_outcome.wizard_state;
+    return;
+  }
+  save_settings_changes({ ...wizard_outcome.draft_settings, has_completed_first_run_setup: true });
+  user_interface_state.setup_wizard = null;
+  user_interface_state.active_screen = "paper_list";
+  user_interface_state.setup_wizard_completion_resolver?.();
+  user_interface_state.setup_wizard_completion_resolver = null;
 }
 
 function open_in_browser(url) {
@@ -386,7 +372,7 @@ function write_screen_frame(lines, footer_lines) {
 }
 
 function visible_content_height() {
-  return Math.max(3, (process.stdout.rows ?? 24) - 2);
+  return Math.max(3, (process.stdout.rows || 24) - 2);
 }
 
 function clamped_scroll_offset({ scroll_offset, target_row_index, row_count, content_height }) {
@@ -406,7 +392,7 @@ function footer_status_text() {
 }
 
 function render_paper_list_screen() {
-  const terminal_column_count = process.stdout.columns ?? 80;
+  const terminal_column_count = process.stdout.columns || 80;
   const content_height = visible_content_height();
   const rows = user_interface_state.paper_list_rows;
   const selected_row_index = selected_paper_row_index(rows, user_interface_state.selected_arxiv_id);
@@ -434,7 +420,7 @@ function render_paper_list_screen() {
 }
 
 function render_settings_screen() {
-  const terminal_column_count = process.stdout.columns ?? 80;
+  const terminal_column_count = process.stdout.columns || 80;
   const content_height = visible_content_height();
   const rows = user_interface_state.settings_rows;
 
@@ -459,10 +445,119 @@ function render_settings_screen() {
   write_screen_frame(lines, ["", hints_footer_line]);
 }
 
+const wizard_step_glyph_by_state = {
+  completed: `${completed_glyph_style}✓${ansi_reset}`,
+  active: `${application_title_style}●${ansi_reset}`,
+  pending: `${tree_spine_style}○${ansi_reset}`,
+};
+
+function render_wizard_child_prefix(is_under_last_step) {
+  return is_under_last_step ? "      " : ` ${tree_spine_style}│${ansi_reset}    `;
+}
+
+function render_wizard_text_input_row(row, terminal_column_count) {
+  const editor_state = row.text_editor_state;
+  const editor_width = Math.max(12, terminal_column_count - 14);
+  const { visible_text, cursor_position_in_visible_text } = windowed_draft_for_display({
+    draft_text: editor_state.draft_text,
+    cursor_position: editor_state.cursor_position,
+    maximum_width: editor_width,
+  });
+  const text_before_cursor = visible_text.slice(0, cursor_position_in_visible_text);
+  const character_under_cursor = visible_text[cursor_position_in_visible_text] ?? " ";
+  const text_after_cursor = visible_text.slice(cursor_position_in_visible_text + 1);
+  return (
+    render_wizard_child_prefix(row.is_under_last_step) +
+    `${section_heading_style}▸${ansi_reset} ${text_before_cursor}${ansi_inverse}${character_under_cursor}${ansi_reset}${text_after_cursor}`
+  );
+}
+
+function render_setup_wizard_row(row, terminal_column_count) {
+  if (row.type === "wizard_title") return ` ${application_title_style}${row.text}${ansi_reset}`;
+  if (row.type === "spine") return ` ${tree_spine_style}│${ansi_reset}`;
+
+  if (row.type === "wizard_step") {
+    const branch_glyph = row.is_last_step ? "└─" : "├─";
+    const label_style = row.step_state === "active" ? `${ansi_bold}` : row.step_state === "pending" ? ansi_dim : "";
+    const summary_cell = row.summary_text ? `  ${ansi_dim}${row.summary_text}${ansi_reset}` : "";
+    return (
+      ` ${tree_spine_style}${branch_glyph}${ansi_reset} ${wizard_step_glyph_by_state[row.step_state]} ` +
+      `${label_style}${fit_text_to_width(row.label, 14)}${ansi_reset}${summary_cell}`
+    );
+  }
+
+  if (row.type === "wizard_category_option") {
+    const checkbox_glyph = row.is_tracked ? "[x]" : "[ ]";
+    if (row.is_under_cursor) {
+      return `${render_wizard_child_prefix(row.is_under_last_step)}${ansi_inverse}${ansi_bold} ${checkbox_glyph} ${row.option_label} ${ansi_reset}`;
+    }
+    return `${render_wizard_child_prefix(row.is_under_last_step)} ${checkbox_glyph} ${row.option_label}`;
+  }
+
+  if (row.type === "wizard_continue_option") {
+    if (row.is_under_cursor) {
+      return `${render_wizard_child_prefix(row.is_under_last_step)}${ansi_inverse}${ansi_bold} → continue ${ansi_reset}`;
+    }
+    return `${render_wizard_child_prefix(row.is_under_last_step)} ${ansi_dim}→ continue${ansi_reset}`;
+  }
+
+  if (row.type === "wizard_text_input") return render_wizard_text_input_row(row, terminal_column_count);
+  return "";
+}
+
+function wizard_scroll_target_row_index(rows) {
+  const cursor_row_index = rows.findIndex((row) => row.is_under_cursor);
+  if (cursor_row_index !== -1) return cursor_row_index;
+  return rows.findIndex((row) => row.type === "wizard_step" && row.step_state === "active");
+}
+
+function render_setup_wizard_screen() {
+  const terminal_column_count = process.stdout.columns || 80;
+  const content_height = visible_content_height();
+  const rows = build_setup_wizard_rows(user_interface_state.setup_wizard);
+
+  user_interface_state.setup_wizard_scroll_offset = clamped_scroll_offset({
+    scroll_offset: user_interface_state.setup_wizard_scroll_offset,
+    target_row_index: wizard_scroll_target_row_index(rows),
+    row_count: rows.length,
+    content_height,
+  });
+
+  const lines = [];
+  for (let visible_row_index = 0; visible_row_index < content_height; visible_row_index++) {
+    const row = rows[user_interface_state.setup_wizard_scroll_offset + visible_row_index];
+    lines.push(row ? render_setup_wizard_row(row, terminal_column_count) : "");
+  }
+
+  const validation_message = user_interface_state.setup_wizard.validation_message;
+  const validation_footer_line = validation_message ? ` ${warning_style}${validation_message}${ansi_reset}` : "";
+  const hint_text = active_setup_wizard_step(user_interface_state.setup_wizard).hint_text;
+  const hints_footer_line = ` ${ansi_dim}${hint_text} · esc back · ctrl+c quit${ansi_reset}`;
+  write_screen_frame(lines, [validation_footer_line, hints_footer_line]);
+}
+
+function render_loading_screen() {
+  const status_text = user_interface_state.status_message ?? "starting…";
+  const lines = [
+    ` ${application_title_style}📮 paperman${ansi_reset}`,
+    ` ${tree_spine_style}│${ansi_reset}`,
+    ` ${tree_spine_style}└─${ansi_reset} ${ansi_dim}${status_text}${ansi_reset}`,
+  ];
+  write_screen_frame(lines, ["", ` ${ansi_dim}assembling today's delivery · ctrl+c quit${ansi_reset}`]);
+}
+
 function render() {
   if (!user_interface_state.is_inside_alternate_screen) return;
+  if (user_interface_state.active_screen === "setup_wizard") {
+    render_setup_wizard_screen();
+    return;
+  }
   if (user_interface_state.active_screen === "settings") {
     render_settings_screen();
+    return;
+  }
+  if (!user_interface_state.daily_selection) {
+    render_loading_screen();
     return;
   }
   render_paper_list_screen();
@@ -573,48 +668,53 @@ function quit(exit_code = 0) {
   process.exit(exit_code);
 }
 
+function handle_keypress(typed_character, pressed_key) {
+  if (!pressed_key) return;
+  if (pressed_key.ctrl && pressed_key.name === "c") quit();
+  if (user_interface_state.active_screen === "setup_wizard") {
+    handle_setup_wizard_key(typed_character, pressed_key);
+    render();
+    return;
+  }
+  if (user_interface_state.text_input) {
+    handle_text_input_key(typed_character, pressed_key);
+    render();
+    return;
+  }
+  if (user_interface_state.active_screen === "settings") {
+    handle_settings_key(pressed_key);
+    render();
+    return;
+  }
+  handle_paper_list_key(pressed_key);
+  render();
+}
+
 async function main() {
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     console.error("paperman needs an interactive terminal.");
     process.exit(1);
   }
 
-  if (!user_interface_state.settings.has_completed_first_run_setup) await run_first_run_setup_wizard();
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
+  process.stdin.on("keypress", handle_keypress);
+  process.stdout.on("resize", render);
+  process.on("SIGTERM", () => quit());
+  enter_alternate_screen();
 
-  let daily_selection_result;
+  if (!user_interface_state.settings.has_completed_first_run_setup) await completed_setup_wizard();
+  render();
+
   try {
-    daily_selection_result = await generate_daily_selection({ force_regeneration: false });
+    apply_daily_selection_result(await generate_daily_selection({ force_regeneration: false }));
   } catch (generation_error) {
+    leave_alternate_screen();
     console.error(`❌ ${generation_error.message}`);
     console.error("Check your connection and Fireworks key (settings screen, or FIREWORKS_API_KEY).");
     process.exit(1);
   }
-
-  enter_alternate_screen();
-  apply_daily_selection_result(daily_selection_result);
   render();
-
-  readline.emitKeypressEvents(process.stdin);
-  process.stdin.setRawMode(true);
-  process.stdin.on("keypress", (typed_character, pressed_key) => {
-    if (!pressed_key) return;
-    if (pressed_key.ctrl && pressed_key.name === "c") quit();
-    if (user_interface_state.text_input) {
-      handle_text_input_key(typed_character, pressed_key);
-      render();
-      return;
-    }
-    if (user_interface_state.active_screen === "settings") {
-      handle_settings_key(pressed_key);
-      render();
-      return;
-    }
-    handle_paper_list_key(pressed_key);
-    render();
-  });
-
-  process.stdout.on("resize", render);
-  process.on("SIGTERM", () => quit());
 }
 
 main();

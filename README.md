@@ -31,9 +31,10 @@ paperman
 Or from a clone: `npm install && node paperman.mjs`. Needs Node 20+ and a
 [Fireworks](https://fireworks.ai) API key.
 
-First run walks through a short wizard: API key, categories to track, an
-interests blurb, and your current goal. Everything is editable later from the
-in-app settings screen.
+First run opens a setup screen right in the TUI — paste your API key, check
+off categories with arrows + space/enter, add an interests blurb and your
+current goal. Completed steps collapse into the tree as you go; `esc` steps
+back. Everything is editable later from the in-app settings screen.
 
 ## Keys
 
