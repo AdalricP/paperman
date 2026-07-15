@@ -5,10 +5,16 @@ import { text_editor_state_after_key, text_editor_state_for } from "./single_lin
 
 export const setup_wizard_steps = [
   {
+    step_key: "openrouter_api_key",
+    label: "OpenRouter key",
+    kind: "text",
+    hint_text: "paste your key from openrouter.ai/keys · enter continues",
+  },
+  {
     step_key: "fireworks_api_key",
     label: "Fireworks key",
     kind: "text",
-    hint_text: "paste your key from fireworks.ai → API Keys · enter continues",
+    hint_text: "powers the embedding recommender · enter to skip",
   },
   {
     step_key: "tracked_arxiv_category_codes",
@@ -29,10 +35,10 @@ export const setup_wizard_steps = [
     hint_text: "why you read papers right now · enter to skip",
   },
   {
-    step_key: "fireworks_chat_model_id",
+    step_key: "openrouter_chat_model_id",
     label: "Model",
     kind: "text",
-    hint_text: "enter keeps GLM 5.2",
+    hint_text: "enter keeps DeepSeek V4 Flash",
   },
 ];
 
@@ -45,13 +51,14 @@ function text_editor_for_step(step, draft_settings) {
   return text_editor_state_for({ setting_key: step.step_key, initial_text: draft_settings[step.step_key] ?? "" });
 }
 
-export function initial_setup_wizard_state({ environment_fireworks_api_key }) {
+export function initial_setup_wizard_state({ environment_openrouter_api_key, environment_fireworks_api_key }) {
   const draft_settings = {
+    openrouter_api_key: environment_openrouter_api_key ?? "",
     fireworks_api_key: environment_fireworks_api_key ?? "",
     tracked_arxiv_category_codes: [...default_settings.tracked_arxiv_category_codes],
     interests_blurb_text: "",
     reading_intent_blurb_text: "",
-    fireworks_chat_model_id: default_settings.fireworks_chat_model_id,
+    openrouter_chat_model_id: default_settings.openrouter_chat_model_id,
   };
   return {
     active_step_index: 0,
@@ -90,7 +97,7 @@ function still_editing_outcome(wizard_state, changes) {
 }
 
 function committed_text_value(step, committed_text) {
-  if (step.step_key === "fireworks_chat_model_id" && !committed_text) return default_settings.fireworks_chat_model_id;
+  if (step.step_key === "openrouter_chat_model_id" && !committed_text) return default_settings.openrouter_chat_model_id;
   return committed_text;
 }
 
@@ -107,9 +114,9 @@ function text_step_outcome({ wizard_state, typed_character, pressed_key }) {
 
   const step = step_at_index(wizard_state.active_step_index);
   const committed_text = editor_outcome.editor_state.draft_text.trim();
-  if (step.step_key === "fireworks_api_key" && !committed_text) {
+  if (step.step_key === "openrouter_api_key" && !committed_text) {
     return still_editing_outcome(wizard_state, {
-      validation_message: "an API key is required — paperman ranks papers with Fireworks",
+      validation_message: "an OpenRouter key is required — paperman picks papers with it",
     });
   }
   return advanced_outcome({
@@ -167,12 +174,12 @@ export function active_setup_wizard_step(wizard_state) {
 }
 
 function completed_step_summary_text(step, draft_settings) {
-  if (step.step_key === "fireworks_api_key") return masked_api_key_text(draft_settings.fireworks_api_key);
+  if (step.step_key === "openrouter_api_key") return masked_api_key_text(draft_settings.openrouter_api_key);
+  if (step.step_key === "fireworks_api_key") {
+    return draft_settings.fireworks_api_key ? masked_api_key_text(draft_settings.fireworks_api_key) : "(skipped)";
+  }
   if (step.step_key === "tracked_arxiv_category_codes") {
     return `${draft_settings.tracked_arxiv_category_codes.length} tracked`;
-  }
-  if (step.step_key === "fireworks_chat_model_id") {
-    return draft_settings.fireworks_chat_model_id.replace("accounts/fireworks/models/", "");
   }
   return draft_settings[step.step_key] || "(skipped)";
 }

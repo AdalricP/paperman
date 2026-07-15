@@ -1,4 +1,4 @@
-import { build_daily_pick_prompt, validate_daily_pick_response } from "./fireworks_api.mjs";
+import { build_daily_pick_prompt, validate_daily_pick_response } from "./model_provider_api.mjs";
 import {
   bayes_completed_probabilities,
   blended_relevance_scores,
@@ -8,11 +8,16 @@ import {
   papers_ranked_by_relevance_score,
 } from "./paper_relevance_scores.mjs";
 
-export const number_of_papers_selected_per_day = 10;
 const maximum_candidate_papers_considered = 600;
-const maximum_candidate_papers_sent_to_language_model = 40;
+const minimum_candidates_per_category_sent_to_language_model = 8;
 
 const embedding_text_of_paper = (paper) => `${paper.title}\n\n${paper.abstract_text}`;
+
+export function sanitized_papers_per_category_per_day(papers_per_category_per_day) {
+  const parsed_count = Number.parseInt(papers_per_category_per_day, 10);
+  if (!Number.isInteger(parsed_count) || parsed_count < 1) return 3;
+  return parsed_count;
+}
 
 export function merged_papers_across_feeds(feed_results) {
   const papers_by_arxiv_id = new Map();
@@ -39,9 +44,18 @@ async function fetched_candidate_papers({ tracked_arxiv_category_codes, fetch_pa
     if (feed_settlement.status === "fulfilled") return [];
     return [`${tracked_arxiv_category_codes[category_index]}: ${feed_settlement.reason.message}`];
   });
-  const successful_feed_results = feed_settlements
-    .filter((feed_settlement) => feed_settlement.status === "fulfilled")
-    .map((feed_settlement) => feed_settlement.value);
+  const successful_feed_results = feed_settlements.flatMap((feed_settlement, category_index) => {
+    if (feed_settlement.status !== "fulfilled") return [];
+    return [
+      {
+        announcement_date_iso: feed_settlement.value.announcement_date_iso,
+        papers: feed_settlement.value.papers.map((paper) => ({
+          ...paper,
+          source_feed_category_code: tracked_arxiv_category_codes[category_index],
+        })),
+      },
+    ];
+  });
   if (successful_feed_results.length === 0) {
     throw new Error(`Every tracked arXiv feed failed: ${feed_warnings.join(" · ")}`);
   }
@@ -90,12 +104,47 @@ async function embedding_vectors_or_warning({ candidate_papers, embed_texts }) {
   }
 }
 
-async function locally_ranked_candidates({ candidate_papers, training_history, embed_texts, report_progress }) {
+function embedding_vector_map(papers, embedding_vectors) {
+  if (!embedding_vectors) return new Map();
+  return new Map(papers.map((paper, paper_index) => [paper.arxiv_id, embedding_vectors[paper_index]]));
+}
+
+function embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history }) {
+  if (!embedding_vectors) return null;
+  const raw_affinity_scores = embedding_affinity_scores({
+    candidate_embedding_vectors: embedding_vectors,
+    completed_embedding_vectors: training_history.completed_embedding_vectors,
+    crossed_out_embedding_vectors: training_history.crossed_out_embedding_vectors,
+  });
+  if (!raw_affinity_scores) return null;
+  return min_max_normalized_scores(raw_affinity_scores);
+}
+
+function pruned_by_category({ ordered_papers, ordered_relevance_scores, papers_per_category_per_day }) {
+  const per_category_cap = Math.max(minimum_candidates_per_category_sent_to_language_model, papers_per_category_per_day * 4);
+  const kept_count_by_category = new Map();
+  const pruned_papers = [];
+  const pruned_relevance_scores = [];
+
+  for (const [paper_index, paper] of ordered_papers.entries()) {
+    const category_code = paper.source_feed_category_code;
+    const kept_count = kept_count_by_category.get(category_code) ?? 0;
+    if (kept_count >= per_category_cap) continue;
+    kept_count_by_category.set(category_code, kept_count + 1);
+    pruned_papers.push(paper);
+    if (ordered_relevance_scores) pruned_relevance_scores.push(ordered_relevance_scores[paper_index]);
+  }
+
+  return { pruned_papers, pruned_relevance_scores: ordered_relevance_scores ? pruned_relevance_scores : null };
+}
+
+async function locally_ranked_candidates({ candidate_papers, training_history, embed_texts, papers_per_category_per_day, report_progress }) {
   const is_cold_start = training_history.total_mark_count === 0;
   if (is_cold_start) {
-    const pruned_papers = papers_in_round_robin_across_categories({
-      papers: candidate_papers,
-      maximum_count: maximum_candidate_papers_sent_to_language_model,
+    const { pruned_papers } = pruned_by_category({
+      ordered_papers: candidate_papers,
+      ordered_relevance_scores: null,
+      papers_per_category_per_day,
     });
     const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({
       candidate_papers: pruned_papers,
@@ -120,58 +169,66 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
   });
   const relevance_scores = blended_relevance_scores({ normalized_embedding_scores, bayes_probabilities });
 
-  if (!relevance_scores) {
-    const pruned_papers = papers_in_round_robin_across_categories({
-      papers: candidate_papers,
-      maximum_count: maximum_candidate_papers_sent_to_language_model,
-    });
-    return {
-      pruned_papers,
-      pruned_relevance_scores: null,
-      embedding_vector_by_arxiv_id: embedding_vector_map(candidate_papers, embedding_vectors),
-      scoring_warnings: embedding_warning ? [embedding_warning] : [],
-    };
-  }
+  const ranked_entries = relevance_scores
+    ? papers_ranked_by_relevance_score({ papers: candidate_papers, relevance_scores })
+    : candidate_papers.map((paper) => ({ paper, relevance_score: null }));
+  const { pruned_papers, pruned_relevance_scores } = pruned_by_category({
+    ordered_papers: ranked_entries.map((ranked_entry) => ranked_entry.paper),
+    ordered_relevance_scores: relevance_scores ? ranked_entries.map((ranked_entry) => ranked_entry.relevance_score) : null,
+    papers_per_category_per_day,
+  });
 
-  const ranked_entries = papers_ranked_by_relevance_score({ papers: candidate_papers, relevance_scores }).slice(
-    0,
-    maximum_candidate_papers_sent_to_language_model
-  );
   return {
-    pruned_papers: ranked_entries.map((ranked_entry) => ranked_entry.paper),
-    pruned_relevance_scores: ranked_entries.map((ranked_entry) => ranked_entry.relevance_score),
+    pruned_papers,
+    pruned_relevance_scores,
     embedding_vector_by_arxiv_id: embedding_vector_map(candidate_papers, embedding_vectors),
     scoring_warnings: embedding_warning ? [embedding_warning] : [],
   };
 }
 
-function embedding_vector_map(papers, embedding_vectors) {
-  if (!embedding_vectors) return new Map();
-  return new Map(papers.map((paper, paper_index) => [paper.arxiv_id, embedding_vectors[paper_index]]));
+export function selection_targets_for_candidates({ pruned_papers, papers_per_category_per_day }) {
+  const candidate_count_by_category = new Map();
+  for (const paper of pruned_papers) {
+    const category_code = paper.source_feed_category_code;
+    candidate_count_by_category.set(category_code, (candidate_count_by_category.get(category_code) ?? 0) + 1);
+  }
+  return Object.fromEntries(
+    [...candidate_count_by_category.entries()].map(([category_code, candidate_count]) => [
+      category_code,
+      Math.min(papers_per_category_per_day, candidate_count),
+    ])
+  );
 }
 
-function embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history }) {
-  if (!embedding_vectors) return null;
-  const raw_affinity_scores = embedding_affinity_scores({
-    candidate_embedding_vectors: embedding_vectors,
-    completed_embedding_vectors: training_history.completed_embedding_vectors,
-    crossed_out_embedding_vectors: training_history.crossed_out_embedding_vectors,
+function fallback_picks({ pruned_papers, pruned_relevance_scores, selection_target_by_category_code }) {
+  const fallback_reason = pruned_relevance_scores
+    ? "picked by local relevance ranking (model unavailable)"
+    : "picked in announcement order (model unavailable)";
+  const remaining_target_by_category = { ...selection_target_by_category_code };
+  return pruned_papers.flatMap((pruned_paper) => {
+    const category_code = pruned_paper.source_feed_category_code;
+    if ((remaining_target_by_category[category_code] ?? 0) === 0) return [];
+    remaining_target_by_category[category_code] -= 1;
+    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: fallback_reason }];
   });
-  if (!raw_affinity_scores) return null;
-  return min_max_normalized_scores(raw_affinity_scores);
 }
 
-async function language_model_selection({ settings, pruned_papers, pruned_relevance_scores, request_pick, report_progress }) {
-  const number_of_papers_to_select = Math.min(number_of_papers_selected_per_day, pruned_papers.length);
+async function language_model_selection({
+  settings,
+  pruned_papers,
+  pruned_relevance_scores,
+  selection_target_by_category_code,
+  request_pick,
+  report_progress,
+}) {
   const prompt_text = build_daily_pick_prompt({
     tracked_arxiv_category_codes: settings.tracked_arxiv_category_codes,
     interests_blurb_text: settings.interests_blurb_text,
     reading_intent_blurb_text: settings.reading_intent_blurb_text,
     candidate_papers: pruned_papers,
     candidate_relevance_scores: pruned_relevance_scores,
-    number_of_papers_to_select,
+    selection_target_by_category_code,
   });
-  const candidate_arxiv_ids = pruned_papers.map((pruned_paper) => pruned_paper.arxiv_id);
 
   for (const attempt_number of [1, 2]) {
     try {
@@ -179,26 +236,19 @@ async function language_model_selection({ settings, pruned_papers, pruned_releva
       const response_text = await request_pick(prompt_text);
       const validated_picks = validate_daily_pick_response({
         response_text,
-        candidate_arxiv_ids,
-        number_of_papers_to_select,
+        candidate_papers: pruned_papers,
+        selection_target_by_category_code,
       });
       return { validated_picks, selection_warning: null };
     } catch (selection_error) {
       if (attempt_number === 2) {
-        return { validated_picks: fallback_picks({ pruned_papers, pruned_relevance_scores, number_of_papers_to_select }), selection_warning: `model pick failed, used local ranking: ${selection_error.message}` };
+        return {
+          validated_picks: fallback_picks({ pruned_papers, pruned_relevance_scores, selection_target_by_category_code }),
+          selection_warning: `model pick failed, used local ranking: ${selection_error.message}`,
+        };
       }
     }
   }
-}
-
-function fallback_picks({ pruned_papers, pruned_relevance_scores, number_of_papers_to_select }) {
-  const fallback_reason = pruned_relevance_scores
-    ? "picked by local relevance ranking (model unavailable)"
-    : "picked round-robin across categories (model unavailable)";
-  return pruned_papers.slice(0, number_of_papers_to_select).map((pruned_paper) => ({
-    arxiv_id: pruned_paper.arxiv_id,
-    selection_reason: fallback_reason,
-  }));
 }
 
 function frozen_daily_selection({
@@ -267,14 +317,23 @@ export async function daily_paper_selection_for_date({
     throw new Error("No unmarked papers in any tracked feed today");
   }
 
+  const papers_per_category_per_day = sanitized_papers_per_category_per_day(settings.papers_per_category_per_day);
   const training_history = training_history_from_marks(marked_papers_by_arxiv_id);
   const { pruned_papers, pruned_relevance_scores, embedding_vector_by_arxiv_id, scoring_warnings } =
-    await locally_ranked_candidates({ candidate_papers, training_history, embed_texts, report_progress });
+    await locally_ranked_candidates({
+      candidate_papers,
+      training_history,
+      embed_texts,
+      papers_per_category_per_day,
+      report_progress,
+    });
 
+  const selection_target_by_category_code = selection_targets_for_candidates({ pruned_papers, papers_per_category_per_day });
   const { validated_picks, selection_warning } = await language_model_selection({
     settings,
     pruned_papers,
     pruned_relevance_scores,
+    selection_target_by_category_code,
     request_pick,
     report_progress,
   });

@@ -40,7 +40,9 @@ export function build_paper_list_rows(daily_selection) {
 
   for (const [group_index, [category_code, category_papers]] of category_groups.entries()) {
     const is_last_category = group_index === category_groups.length - 1;
-    const category_heading_text = `${category_code} — ${display_name_for_arxiv_category_code(category_code)}`;
+    const category_display_name = display_name_for_arxiv_category_code(category_code);
+    const category_heading_text =
+      category_display_name === category_code ? category_code : `${category_code} — ${category_display_name}`;
     rows.push({ type: "spine" });
     rows.push({ type: "category_heading", text: category_heading_text, is_last_category });
     for (const paper of category_papers) {
@@ -73,11 +75,13 @@ export function arxiv_id_after_selection_move(rows, selected_arxiv_id, step_in_r
 const editable_text_settings = [
   { setting_key: "interests_blurb_text", label: "Interests", is_masked: false },
   { setting_key: "reading_intent_blurb_text", label: "Goal", is_masked: false },
+  { setting_key: "papers_per_category_per_day", label: "Papers per category", is_masked: false },
 ];
 
-const fireworks_text_settings = [
-  { setting_key: "fireworks_api_key", label: "API key", is_masked: true },
-  { setting_key: "fireworks_chat_model_id", label: "Chat model", is_masked: false },
+const model_provider_text_settings = [
+  { setting_key: "openrouter_api_key", label: "OpenRouter key", is_masked: true },
+  { setting_key: "openrouter_chat_model_id", label: "Chat model", is_masked: false },
+  { setting_key: "fireworks_api_key", label: "Fireworks key (embeddings)", is_masked: true },
 ];
 
 function tracked_category_checkbox_rows(tracked_arxiv_category_codes) {
@@ -104,7 +108,7 @@ export function build_settings_rows(settings) {
     setting_key,
     label,
     is_masked,
-    current_text: settings[setting_key] ?? "",
+    current_text: String(settings[setting_key] ?? ""),
   });
 
   return [
@@ -117,8 +121,8 @@ export function build_settings_rows(settings) {
     { type: "section_heading", text: "Relevance" },
     ...editable_text_settings.map(text_setting_row),
     { type: "blank" },
-    { type: "section_heading", text: "Fireworks" },
-    ...fireworks_text_settings.map(text_setting_row),
+    { type: "section_heading", text: "Models" },
+    ...model_provider_text_settings.map(text_setting_row),
   ];
 }
 

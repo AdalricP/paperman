@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // αριανός
 
+import dotenv from "dotenv";
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import readline from "node:readline";
 import { fetch_arxiv_papers_for_category } from "./source/arxiv_paper_feed.mjs";
-import { embed_paper_texts, request_daily_pick } from "./source/fireworks_api.mjs";
+import { embed_paper_texts, request_daily_pick } from "./source/model_provider_api.mjs";
 import { daily_paper_selection_for_date } from "./source/daily_paper_selection_pipeline.mjs";
 import { google_calendar_event_link, next_full_hour_at_least_minutes_away } from "./source/google_calendar_event_link.mjs";
 import { open_paperman_home_files, paperman_home_directory_path } from "./source/paperman_home_files.mjs";
@@ -50,6 +52,9 @@ const completed_glyph_style = "\x1b[38;2;120;220;120m";
 const crossed_out_glyph_style = "\x1b[38;2;255;110;110m";
 const warning_style = "\x1b[38;2;255;110;110m";
 
+dotenv.config({ path: ".env", quiet: true });
+dotenv.config({ path: join(paperman_home_directory_path(), ".env"), quiet: true });
+
 const home_files = open_paperman_home_files(paperman_home_directory_path());
 
 const user_interface_state = {
@@ -83,6 +88,10 @@ function fireworks_api_key_in_use() {
   return process.env.FIREWORKS_API_KEY?.trim() || user_interface_state.settings.fireworks_api_key;
 }
 
+function openrouter_api_key_in_use() {
+  return process.env.OPENROUTER_API_KEY?.trim() || user_interface_state.settings.openrouter_api_key;
+}
+
 function report_progress(progress_message) {
   if (!user_interface_state.is_inside_alternate_screen) {
     console.log(`  ${progress_message}`);
@@ -110,8 +119,8 @@ async function generate_daily_selection({ force_regeneration }) {
       }),
     request_pick: (prompt_text) =>
       request_daily_pick({
-        fireworks_api_key: fireworks_api_key_in_use(),
-        fireworks_chat_model_id: settings.fireworks_chat_model_id,
+        openrouter_api_key: openrouter_api_key_in_use(),
+        openrouter_chat_model_id: settings.openrouter_chat_model_id,
         prompt_text,
       }),
     report_progress,
@@ -141,6 +150,7 @@ function save_settings_changes(settings_changes) {
 
 function completed_setup_wizard() {
   user_interface_state.setup_wizard = initial_setup_wizard_state({
+    environment_openrouter_api_key: process.env.OPENROUTER_API_KEY?.trim(),
     environment_fireworks_api_key: process.env.FIREWORKS_API_KEY?.trim(),
   });
   user_interface_state.active_screen = "setup_wizard";
@@ -386,7 +396,7 @@ function footer_status_text() {
   const warning_text = user_interface_state.warnings[0]
     ? `${warning_style}${fit_text_to_width(user_interface_state.warnings[0], 60).trim()}${ansi_reset}${ansi_dim} · `
     : "";
-  const category_change_hint = user_interface_state.have_tracked_categories_changed ? "categories changed · press r to refetch · " : "";
+  const category_change_hint = user_interface_state.have_tracked_categories_changed ? "selection settings changed · press r to refetch · " : "";
   const status_text = user_interface_state.status_message ? `${user_interface_state.status_message} · ` : "";
   return `${warning_text}${category_change_hint}${status_text}`;
 }
@@ -606,6 +616,16 @@ function commit_text_input(editor_state) {
     if (committed_text) toggle_tracked_category(committed_text);
     return;
   }
+  if (editor_state.setting_key === "papers_per_category_per_day") {
+    const parsed_count = Number.parseInt(committed_text, 10);
+    if (!Number.isInteger(parsed_count) || parsed_count < 1) {
+      user_interface_state.status_message = "papers per category must be a whole number of 1 or more";
+      return;
+    }
+    save_settings_changes({ papers_per_category_per_day: parsed_count });
+    user_interface_state.have_tracked_categories_changed = true;
+    return;
+  }
   save_settings_changes({ [editor_state.setting_key]: committed_text });
 }
 
@@ -711,7 +731,7 @@ async function main() {
   } catch (generation_error) {
     leave_alternate_screen();
     console.error(`❌ ${generation_error.message}`);
-    console.error("Check your connection and Fireworks key (settings screen, or FIREWORKS_API_KEY).");
+    console.error("Check your connection and OpenRouter key (settings screen, .env, or OPENROUTER_API_KEY).");
     process.exit(1);
   }
   render();

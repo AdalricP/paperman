@@ -3,7 +3,8 @@ import { test } from "node:test";
 import {
   daily_paper_selection_for_date,
   merged_papers_across_feeds,
-  number_of_papers_selected_per_day,
+  sanitized_papers_per_category_per_day,
+  selection_targets_for_candidates,
 } from "../source/daily_paper_selection_pipeline.mjs";
 
 const feed_paper = (arxiv_id, category_code) => ({
@@ -16,20 +17,39 @@ const feed_paper = (arxiv_id, category_code) => ({
   arxiv_abstract_url: `https://arxiv.org/abs/${arxiv_id}`,
 });
 
+const quota_honoring_request_pick = async (prompt_text) => {
+  const candidate_papers = prompt_text
+    .split("\n")
+    .filter((prompt_line) => prompt_line.startsWith('{"arxiv_id"'))
+    .map((candidate_line) => JSON.parse(candidate_line));
+  const quota_summary = prompt_text.match(/exactly these counts \(total \d+\): ([^\n]+)\./)[1];
+  const remaining_target_by_category = Object.fromEntries(
+    quota_summary.split(" · ").map((quota_part) => {
+      const [category_code, target_count] = quota_part.split(": ");
+      return [category_code, Number(target_count)];
+    })
+  );
+  const picked_candidates = candidate_papers.filter((candidate) => {
+    if ((remaining_target_by_category[candidate.quota_category] ?? 0) === 0) return false;
+    remaining_target_by_category[candidate.quota_category] -= 1;
+    return true;
+  });
+  return JSON.stringify({
+    selected_papers: picked_candidates.map((candidate) => ({
+      arxiv_id: candidate.arxiv_id,
+      selection_reason: `reason for ${candidate.arxiv_id}`,
+    })),
+  });
+};
+
 const in_memory_pipeline_dependencies = ({
   existing_daily_selection = null,
   marked_papers_by_arxiv_id = {},
   papers_by_category = { "cs.LG": [feed_paper("2607.00001", "cs.LG"), feed_paper("2607.00002", "cs.LG")] },
+  papers_per_category_per_day = undefined,
   request_pick,
 } = {}) => {
   const call_log = { fetched_categories: [], embedded_text_batches: [], pick_prompts: [], written_daily_selections: [] };
-  const default_request_pick = async (prompt_text) => {
-    const candidate_ids = [...prompt_text.matchAll(/"arxiv_id":"([^"]+)"/g)].map(([, arxiv_id]) => arxiv_id);
-    const number_to_select = Number(prompt_text.match(/Select exactly (\d+) distinct/)[1]);
-    return JSON.stringify({
-      selected_papers: candidate_ids.slice(0, number_to_select).map((arxiv_id) => ({ arxiv_id, selection_reason: `reason for ${arxiv_id}` })),
-    });
-  };
   return {
     call_log,
     dependencies: {
@@ -39,6 +59,7 @@ const in_memory_pipeline_dependencies = ({
         tracked_arxiv_category_codes: Object.keys(papers_by_category),
         interests_blurb_text: "robots",
         reading_intent_blurb_text: "stay current",
+        papers_per_category_per_day,
       },
       read_daily_selection: () => existing_daily_selection,
       write_daily_selection: (daily_selection) => call_log.written_daily_selections.push(daily_selection),
@@ -55,7 +76,7 @@ const in_memory_pipeline_dependencies = ({
       },
       request_pick: async (prompt_text) => {
         call_log.pick_prompts.push(prompt_text);
-        return (request_pick ?? default_request_pick)(prompt_text);
+        return (request_pick ?? quota_honoring_request_pick)(prompt_text);
       },
       report_progress: () => {},
     },
@@ -81,6 +102,23 @@ test("cold start selects without local scores and freezes embeddings and reasons
   assert.ok(daily_selection.selected_papers[0].abstract_embedding_vector);
   assert.deepEqual(warnings, []);
   assert.deepEqual(call_log.written_daily_selections, [daily_selection]);
+});
+
+test("the per-category quota caps how many papers each category contributes", async () => {
+  const { dependencies } = in_memory_pipeline_dependencies({
+    papers_by_category: {
+      "cs.LG": Array.from({ length: 6 }, (_unused, paper_index) => feed_paper(`2607.1000${paper_index}`, "cs.LG")),
+      "cs.RO": [feed_paper("2607.20000", "cs.RO")],
+    },
+    papers_per_category_per_day: 2,
+  });
+  const { daily_selection } = await daily_paper_selection_for_date(dependencies);
+  const selected_counts = {};
+  for (const selected_paper of daily_selection.selected_papers) {
+    selected_counts[selected_paper.source_feed_category_code] =
+      (selected_counts[selected_paper.source_feed_category_code] ?? 0) + 1;
+  }
+  assert.deepEqual(selected_counts, { "cs.LG": 2, "cs.RO": 1 });
 });
 
 test("marked papers are excluded from candidates", async () => {
@@ -145,6 +183,22 @@ test("force regeneration on the same day carries over marks for surviving papers
   assert.deepEqual(daily_selection.mark_by_arxiv_id, { "2607.00001": "completed" });
 });
 
-test("the daily target stays at ten papers", () => {
-  assert.equal(number_of_papers_selected_per_day, 10);
+test("papers per category sanitizes to a positive whole number with a default of three", () => {
+  assert.equal(sanitized_papers_per_category_per_day(undefined), 3);
+  assert.equal(sanitized_papers_per_category_per_day("nonsense"), 3);
+  assert.equal(sanitized_papers_per_category_per_day(0), 3);
+  assert.equal(sanitized_papers_per_category_per_day("5"), 5);
+  assert.equal(sanitized_papers_per_category_per_day(2), 2);
+});
+
+test("selection targets never exceed the available candidates per category", () => {
+  const pruned_papers = [
+    { arxiv_id: "a", source_feed_category_code: "cs.LG" },
+    { arxiv_id: "b", source_feed_category_code: "cs.LG" },
+    { arxiv_id: "c", source_feed_category_code: "cs.RO" },
+  ];
+  assert.deepEqual(selection_targets_for_candidates({ pruned_papers, papers_per_category_per_day: 3 }), {
+    "cs.LG": 2,
+    "cs.RO": 1,
+  });
 });

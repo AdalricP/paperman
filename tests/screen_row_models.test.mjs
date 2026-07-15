@@ -61,10 +61,12 @@ test("selection defaults to the first paper and moves with clamping", () => {
 
 const settings_fixture = {
   tracked_arxiv_category_codes: ["cs.LG", "hep-ex"],
+  papers_per_category_per_day: 3,
   interests_blurb_text: "world models",
   reading_intent_blurb_text: "",
+  openrouter_api_key: "or_secret_key_material",
+  openrouter_chat_model_id: "deepseek/deepseek-v4-flash",
   fireworks_api_key: "fw_secret_key_material",
-  fireworks_chat_model_id: "accounts/fireworks/models/glm-5p2",
 };
 
 test("settings rows list catalog plus custom categories and the editable settings", () => {
@@ -76,9 +78,13 @@ test("settings rows list catalog plus custom categories and the editable setting
   assert.deepEqual(text_setting_keys, [
     "interests_blurb_text",
     "reading_intent_blurb_text",
+    "papers_per_category_per_day",
+    "openrouter_api_key",
+    "openrouter_chat_model_id",
     "fireworks_api_key",
-    "fireworks_chat_model_id",
   ]);
+  const papers_per_category_row = rows.find((row) => row.setting_key === "papers_per_category_per_day");
+  assert.equal(papers_per_category_row.current_text, "3");
   assert.equal(rows.filter((row) => row.type === "add_custom_category_action").length, 1);
 });
 

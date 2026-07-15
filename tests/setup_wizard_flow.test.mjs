@@ -11,8 +11,8 @@ import {
   setup_wizard_steps,
 } from "../source/setup_wizard_flow.mjs";
 
-const fresh_wizard_state = (environment_fireworks_api_key = undefined) =>
-  initial_setup_wizard_state({ environment_fireworks_api_key });
+const fresh_wizard_state = (environment_openrouter_api_key = undefined) =>
+  initial_setup_wizard_state({ environment_openrouter_api_key, environment_fireworks_api_key: undefined });
 
 const after_keys = (wizard_state, key_events) =>
   key_events.reduce(
@@ -29,27 +29,27 @@ const space_key_event = [" ", { name: "space" }];
 const down_key_event = [undefined, { name: "down" }];
 const escape_key_event = [undefined, { name: "escape" }];
 
-test("wizard starts on the api key step, prefilled from the environment", () => {
-  const wizard_state = fresh_wizard_state("fw_from_env");
-  assert.equal(active_setup_wizard_step(wizard_state).step_key, "fireworks_api_key");
-  assert.equal(wizard_state.text_editor_state.draft_text, "fw_from_env");
+test("wizard starts on the openrouter key step, prefilled from the environment", () => {
+  const wizard_state = fresh_wizard_state("or_from_env");
+  assert.equal(active_setup_wizard_step(wizard_state).step_key, "openrouter_api_key");
+  assert.equal(wizard_state.text_editor_state.draft_text, "or_from_env");
 });
 
-test("an empty api key is blocked with a validation message", () => {
+test("an empty openrouter key is blocked with a validation message", () => {
   const outcome = after_keys(fresh_wizard_state(), [enter_key_event]);
   assert.equal(outcome.kind, "in_progress");
   assert.equal(outcome.wizard_state.active_step_index, 0);
-  assert.match(outcome.wizard_state.validation_message, /API key is required/);
+  assert.match(outcome.wizard_state.validation_message, /OpenRouter key is required/);
 });
 
-test("committing the api key advances to the categories step", () => {
-  const outcome = after_keys(fresh_wizard_state(), [...typed_key_events("fw_abc"), enter_key_event]);
-  assert.equal(outcome.wizard_state.draft_settings.fireworks_api_key, "fw_abc");
+test("the fireworks key step is optional and may be skipped with enter", () => {
+  const outcome = after_keys(fresh_wizard_state("or_env"), [enter_key_event, enter_key_event]);
+  assert.equal(outcome.wizard_state.draft_settings.fireworks_api_key, "");
   assert.equal(active_setup_wizard_step(outcome.wizard_state).step_key, "tracked_arxiv_category_codes");
 });
 
 const wizard_state_on_categories_step = () =>
-  after_keys(fresh_wizard_state("fw_env"), [enter_key_event]).wizard_state;
+  after_keys(fresh_wizard_state("or_env"), [enter_key_event, enter_key_event]).wizard_state;
 
 test("arrows move the category cursor and space or enter toggles a checkbox", () => {
   const first_catalog_code = arxiv_category_catalog[0].arxiv_category_code;
@@ -88,12 +88,14 @@ test("enter on the continue option advances only with at least one tracked categ
 
 test("escape retreats to the previous step", () => {
   const outcome = after_keys(wizard_state_on_categories_step(), [escape_key_event]);
-  assert.equal(outcome.wizard_state.active_step_index, 0);
+  assert.equal(outcome.wizard_state.active_step_index, 1);
 });
 
 test("completing every step returns the draft settings with the model defaulted", () => {
   const to_continue_key_events = Array.from({ length: continue_option_cursor_position }, () => down_key_event);
-  const outcome = after_keys(fresh_wizard_state("fw_env"), [
+  const outcome = after_keys(fresh_wizard_state("or_env"), [
+    enter_key_event,
+    ...typed_key_events("fw_abc"),
     enter_key_event,
     ...to_continue_key_events,
     enter_key_event,
@@ -105,14 +107,15 @@ test("completing every step returns the draft settings with the model defaulted"
     enter_key_event,
   ]);
   assert.equal(outcome.kind, "completed");
-  assert.equal(outcome.draft_settings.fireworks_api_key, "fw_env");
+  assert.equal(outcome.draft_settings.openrouter_api_key, "or_env");
+  assert.equal(outcome.draft_settings.fireworks_api_key, "fw_abc");
   assert.equal(outcome.draft_settings.interests_blurb_text, "robots");
   assert.equal(outcome.draft_settings.reading_intent_blurb_text, "thesis");
-  assert.equal(outcome.draft_settings.fireworks_chat_model_id, default_settings.fireworks_chat_model_id);
+  assert.equal(outcome.draft_settings.openrouter_chat_model_id, default_settings.openrouter_chat_model_id);
 });
 
 test("rows show step states, an expanded active step, and summaries for completed steps", () => {
-  const rows_at_start = build_setup_wizard_rows(fresh_wizard_state("fw_env"));
+  const rows_at_start = build_setup_wizard_rows(fresh_wizard_state("or_env"));
   assert.equal(rows_at_start[0].type, "wizard_title");
   const step_rows = rows_at_start.filter((row) => row.type === "wizard_step");
   assert.equal(step_rows.length, setup_wizard_steps.length);
@@ -125,6 +128,7 @@ test("rows show step states, an expanded active step, and summaries for complete
   assert.equal(category_option_rows.length, arxiv_category_catalog.length);
   assert.equal(category_option_rows[0].is_under_cursor, true);
   assert.equal(rows_on_categories.filter((row) => row.type === "wizard_continue_option").length, 1);
-  const completed_step_row = rows_on_categories.find((row) => row.type === "wizard_step" && row.step_state === "completed");
-  assert.equal(completed_step_row.summary_text, "fw_env…");
+  const completed_step_rows = rows_on_categories.filter((row) => row.type === "wizard_step" && row.step_state === "completed");
+  assert.equal(completed_step_rows[0].summary_text, "or_env…");
+  assert.equal(completed_step_rows[1].summary_text, "(skipped)");
 });

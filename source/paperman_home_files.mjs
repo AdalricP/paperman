@@ -4,10 +4,12 @@ import { join } from "node:path";
 
 export const default_settings = {
   tracked_arxiv_category_codes: ["physics", "cs.RO", "cs.LG"],
+  papers_per_category_per_day: 3,
   interests_blurb_text: "",
   reading_intent_blurb_text: "",
+  openrouter_api_key: "",
+  openrouter_chat_model_id: "deepseek/deepseek-v4-flash",
   fireworks_api_key: "",
-  fireworks_chat_model_id: "accounts/fireworks/models/glm-5p2",
   fireworks_embedding_model_id: "fireworks/qwen3-embedding-8b",
   has_completed_first_run_setup: false,
 };
