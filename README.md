@@ -98,9 +98,9 @@ Paperman can append every newly crossed paper to a personal Airtable base. Make
 an empty base, then create a [personal access token](https://airtable.com/create/tokens)
 restricted to that base with `data.records:write` and `schema.bases:write`.
 Paste the token and either the base URL or its `app…` ID into the Airtable rows
-in Settings. On the first crossed paper, paperman creates a `Papers` table and
-starts adding records with the title, timestamp, arXiv ID and URL, categories,
-selection reason, and abstract.
+in Settings. On the first crossed paper, paperman creates a `Reading Notes`
+table with your paper-name, link, usefulness, robotics, note, artifact, and
+improvement columns. Pressing `x` again removes the same Airtable record.
 
 The token is a local write credential. Keep it in Settings only and do not
 commit it.

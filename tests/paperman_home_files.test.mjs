@@ -57,6 +57,16 @@ test("marks upsert and remove from history", () => {
   });
 });
 
+test("Airtable record syncs round-trip and clear independently", () => {
+  with_scratch_home_files((home_files) => {
+    assert.equal(home_files.read_airtable_record_sync("2607.00001"), null);
+    home_files.upsert_airtable_record_sync({ arxiv_id: "2607.00001", airtable_base_id: "appExample", airtable_record_id: "recExample" });
+    assert.deepEqual(home_files.read_airtable_record_sync("2607.00001"), { airtable_base_id: "appExample", airtable_record_id: "recExample" });
+    home_files.remove_airtable_record_sync("2607.00001");
+    assert.equal(home_files.read_airtable_record_sync("2607.00001"), null);
+  });
+});
+
 test("pruning caps history at 1000 marks", () => {
   const synthetic_marked_papers = Object.fromEntries(
     Array.from({ length: 1200 }, (_unused, mark_index) => [

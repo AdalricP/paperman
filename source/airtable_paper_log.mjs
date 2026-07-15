@@ -1,15 +1,15 @@
 const airtable_api_url = "https://api.airtable.com/v0";
-const airtable_papers_table_name = "Papers";
+const airtable_reading_notes_table_name = "Reading Notes";
+const missing_model_error_types = new Set(["MODEL_NOT_FOUND", "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"]);
 
-const paper_table_fields = [
-  { name: "Title", type: "singleLineText" },
-  { name: "Crossed at", type: "singleLineText" },
-  { name: "arXiv ID", type: "singleLineText" },
-  { name: "Source category", type: "singleLineText" },
-  { name: "Primary category", type: "singleLineText" },
-  { name: "arXiv URL", type: "singleLineText" },
-  { name: "Selection reason", type: "multilineText" },
-  { name: "Abstract", type: "multilineText" },
+const reading_notes_table_fields = [
+  { name: "Paper Name", type: "singleLineText" },
+  { name: "Link", type: "singleLineText" },
+  { name: "Useful?", type: "singleLineText" },
+  { name: "Robotics?", type: "singleLineText" },
+  { name: "Key Push note link //", type: "singleLineText" },
+  { name: "Artifact", type: "multilineText" },
+  { name: "How did I improve upon this", type: "multilineText" },
 ];
 
 export function airtable_base_id_from_input(airtable_base_input) {
@@ -36,73 +36,95 @@ async function require_successful_response(response, action_description) {
   throw new Error(`${action_description} (HTTP ${response.status})${message ? `: ${message}` : ""}`);
 }
 
-function airtable_request_options(airtable_personal_access_token, request_body) {
+function airtable_request_options(airtable_personal_access_token, method, request_body) {
   return {
-    method: "POST",
+    method,
     headers: {
       Authorization: `Bearer ${airtable_personal_access_token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(request_body),
+    ...(request_body ? { body: JSON.stringify(request_body) } : {}),
   };
 }
 
-function paper_record_fields(paper, crossed_at_iso) {
+function arxiv_pdf_url(paper) {
+  if (paper.arxiv_abstract_url?.includes("/abs/")) return paper.arxiv_abstract_url.replace("/abs/", "/pdf/");
+  return `https://arxiv.org/pdf/${paper.arxiv_id}`;
+}
+
+function paper_record_fields(paper) {
   return {
-    Title: paper.title,
-    "Crossed at": crossed_at_iso,
-    "arXiv ID": paper.arxiv_id,
-    "Source category": paper.source_feed_category_code ?? "",
-    "Primary category": paper.primary_arxiv_category_code ?? "",
-    "arXiv URL": paper.arxiv_abstract_url ?? "",
-    "Selection reason": paper.language_model_selection_reason ?? "",
-    Abstract: paper.abstract_text ?? "",
+    "Paper Name": paper.title,
+    Link: arxiv_pdf_url(paper),
+    "Useful?": "",
+    "Robotics?": "",
+    "Key Push note link //": "",
+    Artifact: "",
+    "How did I improve upon this": "",
   };
 }
 
-function records_endpoint_url(airtable_base_id) {
-  return `${airtable_api_url}/${encodeURIComponent(airtable_base_id)}/${encodeURIComponent(airtable_papers_table_name)}`;
+function records_endpoint_url(airtable_base_id, airtable_record_id = "") {
+  const endpoint_segments = [airtable_api_url, encodeURIComponent(airtable_base_id), encodeURIComponent(airtable_reading_notes_table_name)];
+  if (airtable_record_id) endpoint_segments.push(encodeURIComponent(airtable_record_id));
+  return endpoint_segments.join("/");
 }
 
-async function create_papers_table({ airtable_personal_access_token, airtable_base_id }) {
+async function create_reading_notes_table({ airtable_personal_access_token, airtable_base_id }) {
   let create_table_response;
   try {
-    create_table_response = await fetch(`${airtable_api_url}/meta/bases/${encodeURIComponent(airtable_base_id)}/tables`, airtable_request_options(airtable_personal_access_token, {
-      name: airtable_papers_table_name,
-      fields: paper_table_fields,
+    create_table_response = await fetch(`${airtable_api_url}/meta/bases/${encodeURIComponent(airtable_base_id)}/tables`, airtable_request_options(airtable_personal_access_token, "POST", {
+      name: airtable_reading_notes_table_name,
+      fields: reading_notes_table_fields,
     }));
   } catch (request_error) {
     throw new Error(`Airtable request failed: ${request_error.message}`);
   }
-  await require_successful_response(create_table_response, "could not create Airtable Papers table");
+  await require_successful_response(create_table_response, "could not create Airtable Reading Notes table");
 }
 
-async function create_paper_record({ airtable_personal_access_token, airtable_base_id, paper, crossed_at_iso }) {
+async function create_paper_record({ airtable_personal_access_token, airtable_base_id, paper }) {
   let create_record_response;
   try {
-    create_record_response = await fetch(records_endpoint_url(airtable_base_id), airtable_request_options(airtable_personal_access_token, {
-      fields: paper_record_fields(paper, crossed_at_iso),
+    create_record_response = await fetch(records_endpoint_url(airtable_base_id), airtable_request_options(airtable_personal_access_token, "POST", {
+      fields: paper_record_fields(paper),
     }));
   } catch (request_error) {
     throw new Error(`Airtable request failed: ${request_error.message}`);
   }
-  if (create_record_response.ok) return { was_created: true, table_was_missing: false };
-  const error_details = response_error_details(await create_record_response.text());
-  if (new Set(["MODEL_NOT_FOUND", "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"]).has(error_details.error_type)) {
-    return { was_created: false, table_was_missing: true };
+  if (create_record_response.ok) {
+    const created_record = await create_record_response.json();
+    if (!created_record.id) throw new Error("Airtable did not return the new record ID");
+    return { was_created: true, airtable_record_id: created_record.id };
   }
+  const error_details = response_error_details(await create_record_response.text());
+  if (missing_model_error_types.has(error_details.error_type)) return { was_created: false, airtable_record_id: "" };
   throw new Error(`could not add paper to Airtable (HTTP ${create_record_response.status})${error_details.message ? `: ${error_details.message}` : ""}`);
 }
 
-export async function append_crossed_paper_to_airtable({ airtable_personal_access_token, airtable_base_input, paper, crossed_at_iso }) {
+export async function append_crossed_paper_to_airtable({ airtable_personal_access_token, airtable_base_input, paper }) {
   const airtable_base_id = airtable_base_id_from_input(airtable_base_input);
   if (!airtable_personal_access_token || !airtable_base_id) return false;
 
-  const first_create_attempt = await create_paper_record({ airtable_personal_access_token, airtable_base_id, paper, crossed_at_iso });
-  if (first_create_attempt.was_created) return true;
+  const first_create_attempt = await create_paper_record({ airtable_personal_access_token, airtable_base_id, paper });
+  if (first_create_attempt.was_created) return { airtable_base_id, airtable_record_id: first_create_attempt.airtable_record_id };
 
-  await create_papers_table({ airtable_personal_access_token, airtable_base_id });
-  const second_create_attempt = await create_paper_record({ airtable_personal_access_token, airtable_base_id, paper, crossed_at_iso });
-  if (second_create_attempt.was_created) return true;
-  throw new Error("Airtable Papers table was not available after creating it");
+  await create_reading_notes_table({ airtable_personal_access_token, airtable_base_id });
+  const second_create_attempt = await create_paper_record({ airtable_personal_access_token, airtable_base_id, paper });
+  if (second_create_attempt.was_created) return { airtable_base_id, airtable_record_id: second_create_attempt.airtable_record_id };
+  throw new Error("Airtable Reading Notes table was not available after creating it");
+}
+
+export async function remove_crossed_paper_from_airtable({ airtable_personal_access_token, airtable_base_input, airtable_record_sync }) {
+  const airtable_base_id = airtable_base_id_from_input(airtable_base_input);
+  if (!airtable_personal_access_token || !airtable_base_id || !airtable_record_sync || airtable_record_sync.airtable_base_id !== airtable_base_id) return false;
+
+  let delete_record_response;
+  try {
+    delete_record_response = await fetch(records_endpoint_url(airtable_base_id, airtable_record_sync.airtable_record_id), airtable_request_options(airtable_personal_access_token, "DELETE"));
+  } catch (request_error) {
+    throw new Error(`Airtable request failed: ${request_error.message}`);
+  }
+  await require_successful_response(delete_record_response, "could not remove paper from Airtable");
+  return true;
 }

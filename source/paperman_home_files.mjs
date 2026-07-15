@@ -51,8 +51,10 @@ export function open_paperman_home_files(home_directory_path) {
   const daily_selection_store = conf_store_named("daily_selection");
   const mark_history_store = conf_store_named("mark_history");
   const candidate_pool_store = conf_store_named("candidate_pool");
+  const airtable_sync_store = conf_store_named("airtable_sync");
 
   const read_mark_history = () => mark_history_store.get("marked_papers_by_arxiv_id", {});
+  const read_airtable_record_syncs = () => airtable_sync_store.get("record_sync_by_arxiv_id", {});
 
   return {
     read_settings: () => ({ ...default_settings, ...settings_store.store }),
@@ -79,6 +81,18 @@ export function open_paperman_home_files(home_directory_path) {
       delete marked_papers_by_arxiv_id[arxiv_id];
       mark_history_store.set("marked_papers_by_arxiv_id", marked_papers_by_arxiv_id);
     },
+    read_airtable_record_sync: (arxiv_id) => read_airtable_record_syncs()[arxiv_id] ?? null,
+    upsert_airtable_record_sync: ({ arxiv_id, airtable_base_id, airtable_record_id }) => {
+      airtable_sync_store.set("record_sync_by_arxiv_id", {
+        ...read_airtable_record_syncs(),
+        [arxiv_id]: { airtable_base_id, airtable_record_id },
+      });
+    },
+    remove_airtable_record_sync: (arxiv_id) => {
+      const record_sync_by_arxiv_id = { ...read_airtable_record_syncs() };
+      delete record_sync_by_arxiv_id[arxiv_id];
+      airtable_sync_store.set("record_sync_by_arxiv_id", record_sync_by_arxiv_id);
+    },
     read_candidate_pool: () => candidate_pool_store.get("papers_by_arxiv_id", {}),
     write_candidate_pool: (candidate_papers_by_arxiv_id, current_date_iso) => {
       candidate_pool_store.clear();
@@ -89,6 +103,7 @@ export function open_paperman_home_files(home_directory_path) {
       daily_selection_store.clear();
       mark_history_store.clear();
       candidate_pool_store.clear();
+      airtable_sync_store.clear();
     },
   };
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { airtable_base_id_from_input, append_crossed_paper_to_airtable } from "../source/airtable_paper_log.mjs";
+import { airtable_base_id_from_input, append_crossed_paper_to_airtable, remove_crossed_paper_from_airtable } from "../source/airtable_paper_log.mjs";
 
 const paper = {
   arxiv_id: "2607.00001",
@@ -23,32 +23,31 @@ test("reads an Airtable base ID from an ID or base URL", () => {
 });
 
 test("an incomplete Airtable connection leaves the local read mark alone", async () => {
-  assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: "", airtable_base_input: airtable_base_id, paper, crossed_at_iso }), false);
-  assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: "", paper, crossed_at_iso }), false);
+  assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: "", airtable_base_input: airtable_base_id, paper }), false);
+  assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: "", paper }), false);
 });
 
-test("crossed papers are added to the configured Airtable Papers table", async () => {
+test("crossed papers are added to the configured Airtable Reading Notes table", async () => {
   const original_fetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (requested_url, options) => {
     requests.push({ requested_url, options });
-    return { ok: true };
+    return { ok: true, json: async () => ({ id: "recExample" }) };
   };
   try {
-    assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: `https://airtable.com/${airtable_base_id}`, paper, crossed_at_iso }), true);
+    assert.deepEqual(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: `https://airtable.com/${airtable_base_id}`, paper }), { airtable_base_id, airtable_record_id: "recExample" });
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Papers`);
+    assert.equal(requests[0].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
     assert.equal(requests[0].options.headers.Authorization, `Bearer ${airtable_token}`);
     assert.deepEqual(JSON.parse(requests[0].options.body), {
       fields: {
-        Title: paper.title,
-        "Crossed at": crossed_at_iso,
-        "arXiv ID": paper.arxiv_id,
-        "Source category": paper.source_feed_category_code,
-        "Primary category": paper.primary_arxiv_category_code,
-        "arXiv URL": paper.arxiv_abstract_url,
-        "Selection reason": paper.language_model_selection_reason,
-        Abstract: paper.abstract_text,
+        "Paper Name": paper.title,
+        Link: "https://arxiv.org/pdf/2607.00001",
+        "Useful?": "",
+        "Robotics?": "",
+        "Key Push note link //": "",
+        Artifact: "",
+        "How did I improve upon this": "",
       },
     });
   } finally {
@@ -56,20 +55,40 @@ test("crossed papers are added to the configured Airtable Papers table", async (
   }
 });
 
-test("the first crossed paper creates a missing Airtable Papers table", async () => {
+test("the first crossed paper creates a missing Airtable Reading Notes table", async () => {
   const original_fetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (requested_url, options) => {
     requests.push({ requested_url, options });
     if (requests.length === 1) return { ok: false, status: 403, text: async () => JSON.stringify({ error: { type: "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message: "Could not find table" } }) };
+    return { ok: true, json: async () => ({ id: "recExample" }) };
+  };
+  try {
+    assert.deepEqual(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: airtable_base_id, paper }), { airtable_base_id, airtable_record_id: "recExample" });
+    assert.equal(requests.length, 3);
+    assert.equal(requests[1].requested_url, `https://api.airtable.com/v0/meta/bases/${airtable_base_id}/tables`);
+    assert.deepEqual(JSON.parse(requests[1].options.body).name, "Reading Notes");
+    assert.equal(requests[2].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
+});
+
+test("uncrossing removes the matching Airtable record", async () => {
+  const original_fetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (requested_url, options) => {
+    request = { requested_url, options };
     return { ok: true };
   };
   try {
-    assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: airtable_base_id, paper, crossed_at_iso }), true);
-    assert.equal(requests.length, 3);
-    assert.equal(requests[1].requested_url, `https://api.airtable.com/v0/meta/bases/${airtable_base_id}/tables`);
-    assert.deepEqual(JSON.parse(requests[1].options.body).name, "Papers");
-    assert.equal(requests[2].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Papers`);
+    assert.equal(await remove_crossed_paper_from_airtable({
+      airtable_personal_access_token: airtable_token,
+      airtable_base_input: airtable_base_id,
+      airtable_record_sync: { airtable_base_id, airtable_record_id: "recExample" },
+    }), true);
+    assert.equal(request.requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes/recExample`);
+    assert.equal(request.options.method, "DELETE");
   } finally {
     globalThis.fetch = original_fetch;
   }
