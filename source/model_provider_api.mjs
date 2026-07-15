@@ -2,6 +2,9 @@ const openrouter_chat_completions_url = "https://openrouter.ai/api/v1/chat/compl
 const maximum_abstract_characters_sent_to_language_model = 700;
 const language_model_sampling_temperature = 0.2;
 const language_model_maximum_output_tokens = 8000;
+const milliseconds_per_second = 1000;
+const openrouter_response_timeout_in_seconds = 75;
+const openrouter_response_timeout_in_milliseconds = openrouter_response_timeout_in_seconds * milliseconds_per_second;
 
 function readable_openrouter_error_text(error_body_text) {
   try {
@@ -13,14 +16,23 @@ function readable_openrouter_error_text(error_body_text) {
 }
 
 async function provider_json_request({ endpoint_url, api_key, request_payload }) {
-  const api_response = await fetch(endpoint_url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${api_key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request_payload),
-  });
+  let api_response;
+  try {
+    api_response = await fetch(endpoint_url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${api_key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request_payload),
+      signal: AbortSignal.timeout(openrouter_response_timeout_in_milliseconds),
+    });
+  } catch (openrouter_request_error) {
+    if (openrouter_request_error.name === "TimeoutError") {
+      throw new Error(`OpenRouter request timed out after ${openrouter_response_timeout_in_seconds} seconds`);
+    }
+    throw new Error(`OpenRouter request failed before a response: ${openrouter_request_error.message}`);
+  }
   if (!api_response.ok) {
     const error_body_text = await api_response.text();
     const readable_error_text = readable_openrouter_error_text(error_body_text);

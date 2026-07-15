@@ -5,6 +5,9 @@ const arxiv_rss_feed_url_for_category = (arxiv_category_code) =>
 
 const kept_announce_types = new Set(["new", "cross"]);
 const maximum_abstract_characters_kept = 1500;
+const milliseconds_per_second = 1000;
+const arxiv_feed_response_timeout_in_seconds = 20;
+const arxiv_feed_response_timeout_in_milliseconds = arxiv_feed_response_timeout_in_seconds * milliseconds_per_second;
 
 const rss_xml_parser = new XMLParser({
   ignoreAttributes: false,
@@ -71,9 +74,18 @@ export function parse_arxiv_rss_feed(rss_xml_text) {
 }
 
 export async function fetch_arxiv_papers_for_category(arxiv_category_code) {
-  const feed_response = await fetch(arxiv_rss_feed_url_for_category(arxiv_category_code), {
-    headers: { "User-Agent": "paperman (daily arxiv reading TUI)" },
-  });
+  let feed_response;
+  try {
+    feed_response = await fetch(arxiv_rss_feed_url_for_category(arxiv_category_code), {
+      headers: { "User-Agent": "paperman (daily arxiv reading TUI)" },
+      signal: AbortSignal.timeout(arxiv_feed_response_timeout_in_milliseconds),
+    });
+  } catch (arxiv_feed_error) {
+    if (arxiv_feed_error.name === "TimeoutError") {
+      throw new Error(`arXiv feed ${arxiv_category_code} timed out after ${arxiv_feed_response_timeout_in_seconds} seconds`);
+    }
+    throw new Error(`arXiv feed ${arxiv_category_code} request failed: ${arxiv_feed_error.message}`);
+  }
   if (!feed_response.ok) {
     throw new Error(`arXiv feed ${arxiv_category_code} returned HTTP ${feed_response.status}`);
   }
