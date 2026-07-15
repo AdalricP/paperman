@@ -1,0 +1,37 @@
+{
+  "name": "paperman",
+  "version": "1.0.0",
+  "description": "Daily arXiv top-10 in your terminal — hybrid recommender + GLM 5.2, linv-style TUI",
+  "type": "module",
+  "bin": {
+    "paperman": "paperman.mjs"
+  },
+  "files": [
+    "paperman.mjs",
+    "source",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "conf": "15.1.0",
+    "fast-xml-parser": "5.10.0",
+    "ml-distance": "4.0.1",
+    "natural": "8.1.1"
+  },
+  "keywords": [
+    "arxiv",
+    "papers",
+    "tui",
+    "terminal",
+    "recommender",
+    "fireworks",
+    "glm"
+  ],
+  "author": "AdalricP <pahwani.aryan@gmail.com>",
+  "license": "MIT"
+}
