@@ -8,6 +8,7 @@ import { fetch_arxiv_papers_for_category } from "./source/arxiv_paper_feed.mjs";
 import { request_daily_pick } from "./source/model_provider_api.mjs";
 import { daily_paper_selection_for_date } from "./source/daily_paper_selection_pipeline.mjs";
 import { google_calendar_event_link, next_full_hour_at_least_minutes_away } from "./source/google_calendar_event_link.mjs";
+import { append_crossed_paper_to_google_sheet } from "./source/google_sheets_webhook.mjs";
 import { open_paperman_home_files, paperman_home_directory_path } from "./source/paperman_home_files.mjs";
 import { expanded_category_group_codes_after_toggle, initial_expanded_category_group_codes } from "./source/category_tree_model.mjs";
 import {
@@ -219,6 +220,7 @@ function toggle_crossed_out_mark_on_selected_paper() {
     return;
   }
 
+  const crossed_at_iso = new Date().toISOString();
   marks_by_arxiv_id[paper.arxiv_id] = "crossed_out";
   home_files.upsert_mark({
     arxiv_id: paper.arxiv_id,
@@ -226,9 +228,24 @@ function toggle_crossed_out_mark_on_selected_paper() {
     abstract_text: paper.abstract_text,
     primary_arxiv_category_code: paper.primary_arxiv_category_code,
     mark_kind: "crossed_out",
-    marked_at_iso: new Date().toISOString(),
+    marked_at_iso: crossed_at_iso,
   });
   home_files.write_daily_selection(user_interface_state.daily_selection);
+  user_interface_state.status_message = "crossed as read";
+  append_crossed_paper_to_google_sheet({
+    google_sheets_webhook_url: user_interface_state.settings.google_sheets_webhook_url,
+    paper,
+    crossed_at_iso,
+  })
+    .then((was_appended) => {
+      if (!was_appended) return;
+      user_interface_state.status_message = "crossed as read · added to Google Sheet";
+      render();
+    })
+    .catch((webhook_error) => {
+      user_interface_state.status_message = `crossed locally · Google Sheet sync failed: ${webhook_error.message}`;
+      render();
+    });
 }
 
 async function regenerate_daily_selection() {

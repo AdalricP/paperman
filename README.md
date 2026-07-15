@@ -13,7 +13,7 @@ Your daily arXiv top-10, in the terminal. Made to open with your morning coffee.
       2607.09701  EgoSteer: Steerable dexterous manipulation…      cs.RO
 
  ↳ closest match yet to your interest in egocentric robot learning
- ↑↓ · enter open · c done · x skip · g calendar · → settings · r refresh · q
+ ↑↓ · enter open · x cross read · g calendar · → settings · r refresh · q
 ```
 
 Every day it pulls the newest papers from your tracked arXiv categories, ranks
@@ -91,6 +91,36 @@ Everything lives in `~/.paperman` (override with `PAPERMAN_HOME`):
 reads it from a `.env` in the current directory or in `~/.paperman`.
 `PAPERMAN_FAKE_TODAY=YYYY-MM-DD` pretends it's another day (useful for testing
 the daily freeze).
+
+## Personal Google Sheet log
+
+To append every newly crossed paper to your personal Google Sheet, open the
+sheet's **Extensions → Apps Script**, paste this code, and deploy it as a **Web
+app** that runs as you and is accessible to anyone. Paste the resulting web-app
+URL into **Settings → Google Sheet webhook** in paperman.
+
+```js
+const sheet_id = "18xhmbRDluAwT4bQs34YF9VjN8WgFuKm9YqJCgMonZb0";
+
+function doPost(event) {
+  const paper = JSON.parse(event.postData.contents);
+  const sheet = SpreadsheetApp.openById(sheet_id).getSheets().find((candidate) => candidate.getSheetId() === 0);
+  sheet.appendRow([
+    paper.crossed_at_iso,
+    paper.arxiv_id,
+    paper.title,
+    paper.source_category,
+    paper.primary_category,
+    paper.arxiv_url,
+    paper.selection_reason,
+    paper.abstract,
+  ]);
+  return ContentService.createTextOutput("ok");
+}
+```
+
+The web-app URL is a write credential for this personal log. Keep it in local
+Settings and do not commit it.
 
 ## Notes
 
