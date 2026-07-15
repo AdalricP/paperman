@@ -71,10 +71,6 @@ const in_memory_pipeline_dependencies = ({
         if (!papers) throw new Error(`feed down for ${category_code}`);
         return { announcement_date_iso: "2026-07-14", papers };
       },
-      embed_texts: async (paper_texts) => {
-        call_log.embedded_text_batches.push(paper_texts);
-        return paper_texts.map((paper_text) => (paper_text.includes("robot") ? [1, 0] : [0, 1]));
-      },
       request_pick: async (prompt_text) => {
         call_log.pick_prompts.push(prompt_text);
         return (request_pick ?? quota_honoring_request_pick)(prompt_text);
@@ -92,7 +88,7 @@ test("a selection frozen for today is returned without any fetching", async () =
   assert.deepEqual(call_log.fetched_categories, []);
 });
 
-test("cold start selects without local scores and freezes embeddings and reasons", async () => {
+test("cold start selects without local scores and freezes reasons", async () => {
   const { call_log, dependencies } = in_memory_pipeline_dependencies();
   const { daily_selection, warnings } = await daily_paper_selection_for_date(dependencies);
   assert.equal(daily_selection.selection_date_iso, "2026-07-15");
@@ -100,7 +96,7 @@ test("cold start selects without local scores and freezes embeddings and reasons
   assert.equal(daily_selection.selected_papers.length, 2);
   assert.equal(daily_selection.selected_papers[0].local_relevance_score, null);
   assert.match(daily_selection.selected_papers[0].language_model_selection_reason, /reason for/);
-  assert.ok(daily_selection.selected_papers[0].abstract_embedding_vector);
+  assert.equal("abstract_embedding_vector" in daily_selection.selected_papers[0], false);
   assert.deepEqual(warnings, []);
   assert.deepEqual(call_log.written_daily_selections, [daily_selection]);
 });
@@ -125,18 +121,23 @@ test("the per-category quota caps how many papers each category contributes", as
 test("marked papers are excluded from candidates", async () => {
   const { dependencies } = in_memory_pipeline_dependencies({
     marked_papers_by_arxiv_id: {
-      "2607.00001": { arxiv_id: "2607.00001", title: "T", abstract_text: "A", mark_kind: "completed", marked_at_iso: "2026-07-14T00:00:00.000Z", abstract_embedding_vector: null },
+      "2607.00001": { arxiv_id: "2607.00001", title: "T", abstract_text: "A", mark_kind: "completed", marked_at_iso: "2026-07-14T00:00:00.000Z" },
     },
   });
   const { daily_selection } = await daily_paper_selection_for_date(dependencies);
   assert.deepEqual(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id), ["2607.00002"]);
 });
 
-test("history with embeddings produces local scores that favor similar papers", async () => {
+test("enough feedback trains the lightweight word classifier", async () => {
   const { dependencies } = in_memory_pipeline_dependencies({
     papers_by_category: { "cs.RO": [feed_paper("2607.00010", "cs.RO"), { ...feed_paper("2607.00011", "cs.RO"), abstract_text: "robot grasping study" }] },
     marked_papers_by_arxiv_id: {
-      "2607.99999": { arxiv_id: "2607.99999", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-01T00:00:00.000Z", abstract_embedding_vector: [1, 0] },
+      completed_one: { arxiv_id: "completed_one", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-01T00:00:00.000Z" },
+      completed_two: { arxiv_id: "completed_two", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-02T00:00:00.000Z" },
+      completed_three: { arxiv_id: "completed_three", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-03T00:00:00.000Z" },
+      crossed_one: { arxiv_id: "crossed_one", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-04T00:00:00.000Z" },
+      crossed_two: { arxiv_id: "crossed_two", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-05T00:00:00.000Z" },
+      crossed_three: { arxiv_id: "crossed_three", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-06T00:00:00.000Z" },
     },
   });
   const { daily_selection } = await daily_paper_selection_for_date(dependencies);

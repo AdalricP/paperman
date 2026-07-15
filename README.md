@@ -58,11 +58,10 @@ toward them, crossed-out papers push it away.
 
 1. All of today's announcements from your tracked categories are fetched from
    the official arXiv RSS feeds (`new` + cross-listed submissions only).
-2. Each candidate's title + abstract is embedded locally with
-   `Xenova/all-MiniLM-L6-v2` (downloaded once on first use) and scored by
-   cosine similarity toward your completed papers and away from your
-   crossed-out ones, blended with a Naive Bayes classifier trained on the same
-   history. Papers you've already marked never reappear.
+2. Once you have enough completed and crossed-out papers, a lightweight
+   word-based classifier ranks candidates from that feedback. It uses no
+   downloaded local model or vector database. Papers you've already marked
+   never reappear.
 3. The top candidates per category go to the chat model (default
    `deepseek/deepseek-v4-flash` via OpenRouter) with your categories, interests
    blurb, and goal; it picks the final N per category — "papers per category"

@@ -2,8 +2,6 @@ import { build_daily_pick_prompt, validate_daily_pick_response } from "./model_p
 import {
   bayes_completed_probabilities,
   blended_relevance_scores,
-  embedding_affinity_scores,
-  min_max_normalized_scores,
   papers_in_round_robin_across_categories,
   papers_ranked_by_relevance_score,
 } from "./paper_relevance_scores.mjs";
@@ -110,9 +108,6 @@ function candidate_papers_with_recency({ candidate_papers_by_arxiv_id, current_d
 function training_history_from_marks(marked_papers_by_arxiv_id) {
   const marked_papers = Object.values(marked_papers_by_arxiv_id);
   const marked_papers_of_kind = (mark_kind) => marked_papers.filter((marked_paper) => marked_paper.mark_kind === mark_kind);
-  const embedding_vectors_of = (papers_of_kind) => papers_of_kind
-    .map((marked_paper) => marked_paper.abstract_embedding_vector)
-    .filter((embedding_vector) => Array.isArray(embedding_vector) && embedding_vector.length > 0);
   const training_text_of = (marked_paper) => `${marked_paper.title}\n\n${marked_paper.abstract_text}`;
 
   const completed_papers = marked_papers_of_kind("completed");
@@ -121,39 +116,7 @@ function training_history_from_marks(marked_papers_by_arxiv_id) {
     total_mark_count: marked_papers.length,
     completed_texts: completed_papers.map(training_text_of),
     crossed_out_texts: crossed_out_papers.map(training_text_of),
-    completed_embedding_vectors: embedding_vectors_of(completed_papers),
-    crossed_out_embedding_vectors: embedding_vectors_of(crossed_out_papers),
   };
-}
-
-async function embedding_vectors_or_warning({ candidate_papers, embed_texts, report_progress }) {
-  try {
-    report_progress("embedding candidates locally… first use downloads the model once");
-    const embedding_vectors = await embed_texts(candidate_papers.map(embedding_text_of_paper));
-    return { embedding_vectors, embedding_warning: null };
-  } catch (embedding_error) {
-    return { embedding_vectors: null, embedding_warning: `embeddings unavailable: ${embedding_error.message}` };
-  }
-}
-
-function embedding_vector_map(papers, embedding_vectors) {
-  if (!embedding_vectors) return new Map();
-  return new Map(papers.map((paper, paper_index) => [paper.arxiv_id, embedding_vectors[paper_index]]));
-}
-
-function embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history }) {
-  if (!embedding_vectors) return null;
-  const expected_embedding_dimension_count = embedding_vectors[0]?.length;
-  if (!expected_embedding_dimension_count) return null;
-  const matching_embedding_vectors = (embedding_vectors_to_filter) =>
-    embedding_vectors_to_filter.filter((embedding_vector) => embedding_vector.length === expected_embedding_dimension_count);
-  const raw_affinity_scores = embedding_affinity_scores({
-    candidate_embedding_vectors: embedding_vectors,
-    completed_embedding_vectors: matching_embedding_vectors(training_history.completed_embedding_vectors),
-    crossed_out_embedding_vectors: matching_embedding_vectors(training_history.crossed_out_embedding_vectors),
-  });
-  if (!raw_affinity_scores) return null;
-  return min_max_normalized_scores(raw_affinity_scores);
 }
 
 function papers_ranked_by_recency(candidate_papers) {
@@ -184,7 +147,7 @@ function pruned_by_category({ ordered_papers, ordered_relevance_scores, papers_p
   return { pruned_papers, pruned_relevance_scores: ordered_relevance_scores ? pruned_relevance_scores : null };
 }
 
-async function locally_ranked_candidates({ candidate_papers, training_history, embed_texts, papers_per_category_per_day, report_progress }) {
+async function locally_ranked_candidates({ candidate_papers, training_history, papers_per_category_per_day, report_progress }) {
   const is_cold_start = training_history.total_mark_count === 0;
   if (is_cold_start) {
     const { pruned_papers } = pruned_by_category({
@@ -192,29 +155,20 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
       ordered_relevance_scores: null,
       papers_per_category_per_day,
     });
-    const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({
-      candidate_papers: pruned_papers,
-      embed_texts,
-      report_progress,
-    });
     return {
       pruned_papers,
       pruned_relevance_scores: null,
-      embedding_vector_by_arxiv_id: embedding_vector_map(pruned_papers, embedding_vectors),
-      scoring_warnings: embedding_warning ? [embedding_warning] : [],
+      scoring_warnings: [],
     };
   }
 
   report_progress(`scoring ${candidate_papers.length} candidates against ${training_history.total_mark_count} past marks…`);
-  const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({ candidate_papers, embed_texts, report_progress });
-
-  const normalized_embedding_scores = embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history });
   const bayes_probabilities = bayes_completed_probabilities({
     candidate_texts: candidate_papers.map(embedding_text_of_paper),
     completed_texts: training_history.completed_texts,
     crossed_out_texts: training_history.crossed_out_texts,
   });
-  const relevance_scores = blended_relevance_scores({ normalized_embedding_scores, bayes_probabilities });
+  const relevance_scores = blended_relevance_scores({ normalized_embedding_scores: null, bayes_probabilities });
   const relevance_scores_including_recency = relevance_scores
     ? blended_relevance_and_recency_scores(relevance_scores, candidate_papers)
     : null;
@@ -231,8 +185,7 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
   return {
     pruned_papers,
     pruned_relevance_scores,
-    embedding_vector_by_arxiv_id: embedding_vector_map(candidate_papers, embedding_vectors),
-    scoring_warnings: embedding_warning ? [embedding_warning] : [],
+    scoring_warnings: [],
   };
 }
 
@@ -307,7 +260,6 @@ function frozen_daily_selection({
   validated_picks,
   pruned_papers,
   pruned_relevance_scores,
-  embedding_vector_by_arxiv_id,
   previous_marks_by_arxiv_id,
 }) {
   const pruned_paper_by_arxiv_id = new Map(pruned_papers.map((pruned_paper) => [pruned_paper.arxiv_id, pruned_paper]));
@@ -322,7 +274,6 @@ function frozen_daily_selection({
     ...pruned_paper_by_arxiv_id.get(validated_pick.arxiv_id),
     local_relevance_score: relevance_score_by_arxiv_id.get(validated_pick.arxiv_id),
     language_model_selection_reason: validated_pick.selection_reason,
-    abstract_embedding_vector: embedding_vector_by_arxiv_id.get(validated_pick.arxiv_id) ?? null,
   }));
 
   const selected_arxiv_ids = new Set(selected_papers.map((selected_paper) => selected_paper.arxiv_id));
@@ -348,7 +299,6 @@ export async function daily_paper_selection_for_date({
   read_candidate_pool = () => ({}),
   write_candidate_pool = () => {},
   fetch_papers_for_category,
-  embed_texts,
   request_pick,
   report_progress,
 }) {
@@ -386,11 +336,10 @@ export async function daily_paper_selection_for_date({
 
   const papers_per_category_per_day = sanitized_papers_per_category_per_day(settings.papers_per_category_per_day);
   const training_history = training_history_from_marks(marked_papers_by_arxiv_id);
-  const { pruned_papers, pruned_relevance_scores, embedding_vector_by_arxiv_id, scoring_warnings } =
+  const { pruned_papers, pruned_relevance_scores, scoring_warnings } =
     await locally_ranked_candidates({
       candidate_papers: round_robin_candidate_papers,
       training_history,
-      embed_texts,
       papers_per_category_per_day,
       report_progress,
     });
@@ -411,7 +360,6 @@ export async function daily_paper_selection_for_date({
     validated_picks,
     pruned_papers,
     pruned_relevance_scores,
-    embedding_vector_by_arxiv_id,
     previous_marks_by_arxiv_id: is_frozen_for_today ? existing_daily_selection.mark_by_arxiv_id ?? {} : {},
   });
   write_daily_selection(daily_selection);

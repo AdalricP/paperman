@@ -5,7 +5,6 @@ import "./source/environment_variables.mjs";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { fetch_arxiv_papers_for_category } from "./source/arxiv_paper_feed.mjs";
-import { embed_paper_texts } from "./source/local_paper_embeddings.mjs";
 import { request_daily_pick } from "./source/model_provider_api.mjs";
 import { daily_paper_selection_for_date } from "./source/daily_paper_selection_pipeline.mjs";
 import { google_calendar_event_link, next_full_hour_at_least_minutes_away } from "./source/google_calendar_event_link.mjs";
@@ -108,7 +107,6 @@ async function generate_daily_selection({ force_regeneration }) {
     read_candidate_pool: home_files.read_candidate_pool,
     write_candidate_pool: home_files.write_candidate_pool,
     fetch_papers_for_category: fetch_arxiv_papers_for_category,
-    embed_texts: embed_paper_texts,
     request_pick: (prompt_text) =>
       request_daily_pick({
         openrouter_api_key: openrouter_api_key_in_use(),
@@ -207,21 +205,6 @@ function open_reading_session_calendar_link() {
   user_interface_state.status_message = "reading session sent to Google Calendar";
 }
 
-function backfill_missing_embedding_vector(paper) {
-  const embedding_request = embed_paper_texts([`${paper.title}\n\n${paper.abstract_text}`]);
-  embedding_request
-    .then(([embedding_vector]) => {
-      paper.abstract_embedding_vector = embedding_vector;
-      home_files.write_daily_selection(user_interface_state.daily_selection);
-      const marked_paper = home_files.read_mark_history()[paper.arxiv_id];
-      if (marked_paper) home_files.upsert_mark({ ...marked_paper, abstract_embedding_vector: embedding_vector });
-    })
-    .catch((embedding_error) => {
-      user_interface_state.status_message = `embedding backfill failed: ${embedding_error.message}`;
-      render();
-    });
-}
-
 function toggle_mark_on_selected_paper(mark_kind) {
   const paper = selected_paper();
   if (!paper) return;
@@ -243,10 +226,8 @@ function toggle_mark_on_selected_paper(mark_kind) {
     primary_arxiv_category_code: paper.primary_arxiv_category_code,
     mark_kind,
     marked_at_iso: new Date().toISOString(),
-    abstract_embedding_vector: paper.abstract_embedding_vector ?? null,
   });
   home_files.write_daily_selection(user_interface_state.daily_selection);
-  if (!paper.abstract_embedding_vector) backfill_missing_embedding_vector(paper);
 }
 
 async function regenerate_daily_selection() {

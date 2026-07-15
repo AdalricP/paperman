@@ -18,7 +18,6 @@
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
     "conf": "15.1.0",
     "dotenv": "17.4.2",
     "fast-xml-parser": "5.10.0",
@@ -31,7 +30,7 @@
     "tui",
     "terminal",
     "recommender",
-    "local-embeddings",
+    "personalized-ranking",
     "openrouter"
   ],
   "author": "AdalricP <pahwani.aryan@gmail.com>",
