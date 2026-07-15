@@ -8,7 +8,8 @@ export const default_settings = {
   interests_blurb_text: "",
   reading_intent_blurb_text: "",
   openrouter_api_key: "",
-  google_sheets_webhook_url: "",
+  airtable_personal_access_token: "",
+  airtable_base_input: "",
   openrouter_chat_model_id: "deepseek/deepseek-v4-flash",
   has_completed_first_run_setup: false,
 };

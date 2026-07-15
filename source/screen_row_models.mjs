@@ -67,7 +67,8 @@ const editable_text_settings = [
   { setting_key: "reading_intent_blurb_text", label: "Goal", is_masked: false },
   { setting_key: "papers_per_category_per_day", label: "Papers per category", is_masked: false },
   { setting_key: "openrouter_api_key", label: "OpenRouter key", is_masked: true },
-  { setting_key: "google_sheets_webhook_url", label: "Google Sheet webhook", is_masked: true },
+  { setting_key: "airtable_personal_access_token", label: "Airtable token", is_masked: true },
+  { setting_key: "airtable_base_input", label: "Airtable base URL or ID", is_masked: false },
 ];
 
 export function build_settings_rows(settings, expanded_category_group_codes = initial_expanded_category_group_codes(settings.tracked_arxiv_category_codes)) {
