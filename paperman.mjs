@@ -211,6 +211,7 @@ function open_reading_session_calendar_link() {
 function toggle_crossed_out_mark_on_selected_paper() {
   const paper = selected_paper();
   if (!paper) return;
+  user_interface_state.status_message = null;
   const marks_by_arxiv_id = user_interface_state.daily_selection.mark_by_arxiv_id;
   const is_already_crossed_out = marks_by_arxiv_id[paper.arxiv_id] === "crossed_out";
 
@@ -219,11 +220,7 @@ function toggle_crossed_out_mark_on_selected_paper() {
     home_files.remove_mark(paper.arxiv_id);
     home_files.write_daily_selection(user_interface_state.daily_selection);
     const airtable_record_sync = home_files.read_airtable_record_sync(paper.arxiv_id);
-    if (!airtable_record_sync) {
-      user_interface_state.status_message = "uncrossed";
-      return;
-    }
-    user_interface_state.status_message = "removing from Airtable…";
+    if (!airtable_record_sync) return;
     remove_crossed_paper_from_airtable({
       airtable_personal_access_token: user_interface_state.settings.airtable_personal_access_token,
       airtable_base_input: user_interface_state.settings.airtable_base_input,
@@ -232,7 +229,6 @@ function toggle_crossed_out_mark_on_selected_paper() {
       .then((was_removed) => {
         if (!was_removed) return;
         home_files.remove_airtable_record_sync(paper.arxiv_id);
-        user_interface_state.status_message = "uncrossed · removed from Airtable";
         render();
       })
       .catch((airtable_error) => {
@@ -253,13 +249,9 @@ function toggle_crossed_out_mark_on_selected_paper() {
     marked_at_iso: crossed_at_iso,
   });
   home_files.write_daily_selection(user_interface_state.daily_selection);
-  user_interface_state.status_message = "crossed as read";
   const configured_airtable_base_id = airtable_base_id_from_input(user_interface_state.settings.airtable_base_input);
   const airtable_record_sync = home_files.read_airtable_record_sync(paper.arxiv_id);
-  if (airtable_record_sync?.airtable_base_id === configured_airtable_base_id) {
-    user_interface_state.status_message = "crossed as read · already in Airtable";
-    return;
-  }
+  if (airtable_record_sync?.airtable_base_id === configured_airtable_base_id) return;
   if (user_interface_state.pending_airtable_sync_arxiv_ids.has(paper.arxiv_id)) return;
   user_interface_state.pending_airtable_sync_arxiv_ids.add(paper.arxiv_id);
   append_crossed_paper_to_airtable({
@@ -276,12 +268,10 @@ function toggle_crossed_out_mark_on_selected_paper() {
           airtable_base_input: user_interface_state.settings.airtable_base_input,
           airtable_record_sync: new_airtable_record_sync,
         });
-        user_interface_state.status_message = "uncrossed · removed from Airtable";
         render();
         return;
       }
       home_files.upsert_airtable_record_sync({ arxiv_id: paper.arxiv_id, ...new_airtable_record_sync });
-      user_interface_state.status_message = "crossed as read · added to Airtable";
       render();
     })
     .catch((airtable_error) => {
