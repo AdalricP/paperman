@@ -69,8 +69,30 @@ test("the first crossed paper creates a missing Airtable Reading Notes table", a
     assert.equal(requests[1].requested_url, `https://api.airtable.com/v0/meta/bases/${airtable_base_id}/tables`);
     assert.deepEqual(JSON.parse(requests[1].options.body).name, "Pushes");
     assert.deepEqual(JSON.parse(requests[2].options.body).name, "Reading Notes");
-    assert.deepEqual(JSON.parse(requests[2].options.body).fields.find((field) => field.name === "Key Push"), { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: "tblPushes" } });
+    const reading_notes_fields = JSON.parse(requests[2].options.body).fields;
+    assert.deepEqual(reading_notes_fields.find((field) => field.name === "Useful?"), { name: "Useful?", type: "checkbox", options: { color: "greenBright", icon: "check" } });
+    assert.deepEqual(reading_notes_fields.find((field) => field.name === "Key Push"), { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: "tblPushes" } });
     assert.equal(requests[3].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
+});
+
+test("a partially created Pushes table is reused before Reading Notes is created", async () => {
+  const original_fetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (requested_url, options) => {
+    requests.push({ requested_url, options });
+    if (requests.length === 1) return { ok: false, status: 403, text: async () => JSON.stringify({ error: { type: "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message: "Could not find table" } }) };
+    if (requests.length === 2) return { ok: false, status: 422, text: async () => JSON.stringify({ error: { type: "DUPLICATE_TABLE_NAME", message: "Pushes already exists" } }) };
+    if (requests.length === 3) return { ok: true, json: async () => ({ tables: [{ id: "tblExistingPushes", name: "Pushes" }] }) };
+    if (requests.length === 4) return { ok: true };
+    return { ok: true, json: async () => ({ id: "recExample" }) };
+  };
+  try {
+    assert.deepEqual(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: airtable_base_id, paper }), { airtable_base_id, airtable_record_id: "recExample" });
+    assert.equal(requests[2].options.method, "GET");
+    assert.deepEqual(JSON.parse(requests[3].options.body).fields.find((field) => field.name === "Key Push"), { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: "tblExistingPushes" } });
   } finally {
     globalThis.fetch = original_fetch;
   }

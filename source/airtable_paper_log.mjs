@@ -2,6 +2,7 @@ const airtable_api_url = "https://api.airtable.com/v0";
 const airtable_reading_notes_table_name = "Reading Notes";
 const airtable_pushes_table_name = "Pushes";
 const missing_model_error_types = new Set(["MODEL_NOT_FOUND", "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"]);
+const checkbox_field_options = { color: "greenBright", icon: "check" };
 
 const pushes_table_fields = [
   { name: "Push", type: "singleLineText" },
@@ -12,8 +13,8 @@ function reading_notes_table_fields(pushes_table_id) {
   return [
     { name: "Paper Name", type: "singleLineText" },
     { name: "Link", type: "url" },
-    { name: "Useful?", type: "checkbox" },
-    { name: "Robotics?", type: "checkbox" },
+    { name: "Useful?", type: "checkbox", options: checkbox_field_options },
+    { name: "Robotics?", type: "checkbox", options: checkbox_field_options },
     { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: pushes_table_id } },
     { name: "Artifact", type: "url" },
   ];
@@ -85,10 +86,29 @@ async function create_pushes_table({ airtable_personal_access_token, airtable_ba
   } catch (request_error) {
     throw new Error(`Airtable request failed: ${request_error.message}`);
   }
-  await require_successful_response(create_table_response, "could not create Airtable Pushes table");
-  const created_pushes_table = await create_table_response.json();
-  if (!created_pushes_table.id) throw new Error("Airtable did not return the new Pushes table ID");
-  return created_pushes_table.id;
+  if (create_table_response.ok) {
+    const created_pushes_table = await create_table_response.json();
+    if (!created_pushes_table.id) throw new Error("Airtable did not return the new Pushes table ID");
+    return created_pushes_table.id;
+  }
+  return existing_pushes_table_id({ airtable_personal_access_token, airtable_base_id, create_table_error_details: response_error_details(await create_table_response.text()) });
+}
+
+async function existing_pushes_table_id({ airtable_personal_access_token, airtable_base_id, create_table_error_details }) {
+  let base_schema_response;
+  try {
+    base_schema_response = await fetch(`${airtable_api_url}/meta/bases/${encodeURIComponent(airtable_base_id)}/tables`, airtable_request_options(airtable_personal_access_token, "GET"));
+  } catch (request_error) {
+    throw new Error(`Airtable request failed: ${request_error.message}`);
+  }
+  if (!base_schema_response.ok) {
+    const { message } = response_error_details(await base_schema_response.text());
+    throw new Error(`could not reuse Airtable Pushes table (HTTP ${base_schema_response.status})${message ? `: ${message}` : ""} · add schema.bases:read to your Airtable token`);
+  }
+  const base_schema = await base_schema_response.json();
+  const existing_pushes_table = base_schema.tables?.find((table) => table.name === airtable_pushes_table_name);
+  if (existing_pushes_table?.id) return existing_pushes_table.id;
+  throw new Error(`could not create Airtable Pushes table${create_table_error_details.message ? `: ${create_table_error_details.message}` : ""}`);
 }
 
 async function create_reading_notes_table({ airtable_personal_access_token, airtable_base_id, pushes_table_id }) {

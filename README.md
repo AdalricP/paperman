@@ -96,7 +96,8 @@ the daily freeze).
 
 Paperman can append every newly crossed paper to a personal Airtable base. Make
 an empty base, then create a [personal access token](https://airtable.com/create/tokens)
-restricted to that base with `data.records:write` and `schema.bases:write`.
+restricted to that base with `data.records:write`, `schema.bases:read`, and
+`schema.bases:write`.
 Paste the token and either the base URL or its `app…` ID into the Airtable rows
 in Settings. On the first crossed paper, paperman creates a `Reading Notes`
 table and a linked `Pushes` table. Reading Notes has your paper name, link,
