@@ -392,13 +392,27 @@ function wrapped_plain_text_lines(text, maximum_line_width) {
   return wrapped_lines;
 }
 
+function active_category_heading_in_scrollable_rows(scrollable_rows, scroll_offset) {
+  const category_heading_indexes = scrollable_rows.flatMap((row, row_index) => (row.type === "category_heading" ? [row_index] : []));
+  const most_recent_heading_index = category_heading_indexes.filter((row_index) => row_index <= scroll_offset).at(-1);
+  const next_heading_index = category_heading_indexes.find((row_index) => row_index > scroll_offset);
+  const heading_index = most_recent_heading_index ?? next_heading_index;
+  if (heading_index === undefined) return null;
+  return { heading_index, row: scrollable_rows[heading_index] };
+}
+
 function render_paper_list_screen() {
   const terminal_column_count = process.stdout.columns || 80;
   const rows = user_interface_state.paper_list_rows;
   const [application_title_row, ...scrollable_rows] = rows;
-  const scrollable_content_height = Math.max(2, visible_content_height() - 1);
   const selected_row_index = selected_paper_row_index(rows, user_interface_state.selected_arxiv_id);
   const selected_scrollable_row_index = Math.max(0, selected_row_index - 1);
+  const visible_rows = visible_content_height();
+  const active_category_heading = active_category_heading_in_scrollable_rows(
+    scrollable_rows,
+    user_interface_state.paper_list_scroll_offset
+  );
+  const scrollable_content_height = Math.max(1, visible_rows - (active_category_heading ? 2 : 1));
 
   user_interface_state.paper_list_scroll_offset = clamped_scroll_offset({
     scroll_offset: user_interface_state.paper_list_scroll_offset,
@@ -406,12 +420,21 @@ function render_paper_list_screen() {
     row_count: scrollable_rows.length,
     content_height: scrollable_content_height,
   });
+  const sticky_category_heading = active_category_heading_in_scrollable_rows(
+    scrollable_rows,
+    user_interface_state.paper_list_scroll_offset
+  );
 
   const column_widths = paper_list_column_widths(rows);
   const lines = [render_paper_list_row(application_title_row, column_widths, terminal_column_count, false)];
+  if (sticky_category_heading) lines.push(render_paper_list_row(sticky_category_heading.row, column_widths, terminal_column_count, false));
+  const first_scrollable_row_index = sticky_category_heading && sticky_category_heading.heading_index >= user_interface_state.paper_list_scroll_offset
+    ? sticky_category_heading.heading_index + 1
+    : user_interface_state.paper_list_scroll_offset;
   for (let visible_row_index = 0; visible_row_index < scrollable_content_height; visible_row_index++) {
-    const row = scrollable_rows[user_interface_state.paper_list_scroll_offset + visible_row_index];
-    const absolute_row_index = user_interface_state.paper_list_scroll_offset + visible_row_index + 1;
+    const scrollable_row_index = first_scrollable_row_index + visible_row_index;
+    const row = scrollable_rows[scrollable_row_index];
+    const absolute_row_index = scrollable_row_index + 1;
     lines.push(row ? render_paper_list_row(row, column_widths, terminal_column_count, absolute_row_index === selected_row_index) : "");
   }
 
