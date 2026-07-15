@@ -100,7 +100,7 @@ function selected_counts_by_category({ selected_papers, category_code_by_arxiv_i
   return selected_counts;
 }
 
-export function validate_daily_pick_response({ response_text, candidate_papers, selection_target_by_category_code }) {
+export function validated_picks_in_daily_pick_response({ response_text, candidate_papers }) {
   let parsed_response;
   try {
     parsed_response = JSON.parse(response_text);
@@ -130,7 +130,18 @@ export function validate_daily_pick_response({ response_text, candidate_papers, 
     seen_selected_ids.add(selected_paper.arxiv_id);
   }
 
-  const selected_counts = selected_counts_by_category({ selected_papers, category_code_by_arxiv_id });
+  return selected_papers.map((selected_paper) => ({
+    arxiv_id: selected_paper.arxiv_id,
+    selection_reason: selected_paper.selection_reason.trim(),
+  }));
+}
+
+export function validate_daily_pick_response({ response_text, candidate_papers, selection_target_by_category_code }) {
+  const validated_picks = validated_picks_in_daily_pick_response({ response_text, candidate_papers });
+  const category_code_by_arxiv_id = new Map(
+    candidate_papers.map((candidate_paper) => [candidate_paper.arxiv_id, candidate_paper.source_feed_category_code])
+  );
+  const selected_counts = selected_counts_by_category({ selected_papers: validated_picks, category_code_by_arxiv_id });
   for (const [category_code, selection_target] of Object.entries(selection_target_by_category_code)) {
     const selected_count = selected_counts[category_code] ?? 0;
     if (selected_count !== selection_target) {
@@ -138,10 +149,7 @@ export function validate_daily_pick_response({ response_text, candidate_papers, 
     }
   }
 
-  return selected_papers.map((selected_paper) => ({
-    arxiv_id: selected_paper.arxiv_id,
-    selection_reason: selected_paper.selection_reason.trim(),
-  }));
+  return validated_picks;
 }
 
 export async function request_daily_pick({ openrouter_api_key, openrouter_chat_model_id, prompt_text }) {

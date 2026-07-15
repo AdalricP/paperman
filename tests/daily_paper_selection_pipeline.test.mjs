@@ -155,6 +155,24 @@ test("an invalid model response is retried once then falls back to local ranking
   assert.match(warnings[0], /model pick failed/);
 });
 
+test("a model response missing one category slot is completed in recency order", async () => {
+  const { call_log, dependencies } = in_memory_pipeline_dependencies({
+    request_pick: async (prompt_text) => {
+      const first_candidate = prompt_text
+        .split("\n")
+        .find((prompt_line) => prompt_line.startsWith('{"arxiv_id"'));
+      return JSON.stringify({
+        selected_papers: [{ arxiv_id: JSON.parse(first_candidate).arxiv_id, selection_reason: "the model's first pick" }],
+      });
+    },
+  });
+  const { daily_selection, warnings } = await daily_paper_selection_for_date(dependencies);
+  assert.equal(call_log.pick_prompts.length, 1);
+  assert.equal(daily_selection.selected_papers.length, 2);
+  assert.match(daily_selection.selected_papers[1].language_model_selection_reason, /complete the category quota/);
+  assert.deepEqual(warnings, []);
+});
+
 test("cross-listed papers merge their category codes across feeds", () => {
   const merged_papers = merged_papers_across_feeds([
     { papers: [feed_paper("2607.00001", "cs.LG")] },

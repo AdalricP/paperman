@@ -1,4 +1,4 @@
-import { build_daily_pick_prompt, validate_daily_pick_response } from "./model_provider_api.mjs";
+import { build_daily_pick_prompt, validated_picks_in_daily_pick_response } from "./model_provider_api.mjs";
 
 const maximum_candidate_papers_considered = 600;
 const minimum_candidates_per_category_sent_to_language_model = 8;
@@ -167,6 +167,29 @@ function fallback_picks({ pruned_papers, selection_target_by_category_code }) {
   });
 }
 
+function picks_completed_from_recency_order({ model_validated_picks, pruned_papers, selection_target_by_category_code }) {
+  const category_code_by_arxiv_id = new Map(
+    pruned_papers.map((pruned_paper) => [pruned_paper.arxiv_id, pruned_paper.source_feed_category_code])
+  );
+  const remaining_count_by_category_code = { ...selection_target_by_category_code };
+  const picked_arxiv_ids = new Set();
+  for (const model_validated_pick of model_validated_picks) {
+    const category_code = category_code_by_arxiv_id.get(model_validated_pick.arxiv_id);
+    if ((remaining_count_by_category_code[category_code] ?? 0) === 0) {
+      throw new Error(`Daily pick chose more than ${selection_target_by_category_code[category_code]} papers for ${category_code}`);
+    }
+    remaining_count_by_category_code[category_code] -= 1;
+    picked_arxiv_ids.add(model_validated_pick.arxiv_id);
+  }
+  const recency_completion_picks = pruned_papers.flatMap((pruned_paper) => {
+    const category_code = pruned_paper.source_feed_category_code;
+    if (picked_arxiv_ids.has(pruned_paper.arxiv_id) || (remaining_count_by_category_code[category_code] ?? 0) === 0) return [];
+    remaining_count_by_category_code[category_code] -= 1;
+    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: "selected in recency order to complete the category quota" }];
+  });
+  return [...model_validated_picks, ...recency_completion_picks];
+}
+
 async function language_model_selection({
   settings,
   pruned_papers,
@@ -186,9 +209,13 @@ async function language_model_selection({
     try {
       report_progress(attempt_number === 1 ? "asking the model for today's picks…" : "retrying the model once…");
       const response_text = await request_pick(prompt_text);
-      const validated_picks = validate_daily_pick_response({
+      const model_validated_picks = validated_picks_in_daily_pick_response({
         response_text,
         candidate_papers: pruned_papers,
+      });
+      const validated_picks = picks_completed_from_recency_order({
+        model_validated_picks,
+        pruned_papers,
         selection_target_by_category_code,
       });
       return { validated_picks, selection_warning: null };
