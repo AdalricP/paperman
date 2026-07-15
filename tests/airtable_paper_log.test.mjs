@@ -7,6 +7,7 @@ const paper = {
   title: "A paper",
   source_feed_category_code: "math-ph",
   primary_arxiv_category_code: "math-ph",
+  arxiv_category_codes: ["math-ph"],
   arxiv_abstract_url: "https://arxiv.org/abs/2607.00001",
   language_model_selection_reason: "useful today",
   abstract_text: "An abstract",
@@ -45,6 +46,7 @@ test("crossed papers are added to the configured Airtable Reading Notes table", 
         Link: "https://arxiv.org/pdf/2607.00001",
         "Useful?": false,
         "Robotics?": false,
+        "Paper Contribution": "",
         Artifact: null,
       },
     });
@@ -71,8 +73,24 @@ test("the first crossed paper creates a missing Airtable Reading Notes table", a
     assert.deepEqual(JSON.parse(requests[2].options.body).name, "Reading Notes");
     const reading_notes_fields = JSON.parse(requests[2].options.body).fields;
     assert.deepEqual(reading_notes_fields.find((field) => field.name === "Useful?"), { name: "Useful?", type: "checkbox", options: { color: "greenBright", icon: "check" } });
+    assert.equal(reading_notes_fields.findIndex((field) => field.name === "Paper Contribution") + 1, reading_notes_fields.findIndex((field) => field.name === "Key Push"));
     assert.deepEqual(reading_notes_fields.find((field) => field.name === "Key Push"), { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: "tblPushes" } });
     assert.equal(requests[3].requested_url, `https://api.airtable.com/v0/${airtable_base_id}/Reading%20Notes`);
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
+});
+
+test("robotics papers arrive with the Robotics checkbox selected", async () => {
+  const original_fetch = globalThis.fetch;
+  let request_options;
+  globalThis.fetch = async (_requested_url, options) => {
+    request_options = options;
+    return { ok: true, json: async () => ({ id: "recExample" }) };
+  };
+  try {
+    await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: airtable_base_id, paper: { ...paper, source_feed_category_code: "cs.RO" } });
+    assert.equal(JSON.parse(request_options.body).fields["Robotics?"], true);
   } finally {
     globalThis.fetch = original_fetch;
   }

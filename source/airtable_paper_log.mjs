@@ -15,6 +15,7 @@ function reading_notes_table_fields(pushes_table_id) {
     { name: "Link", type: "url" },
     { name: "Useful?", type: "checkbox", options: checkbox_field_options },
     { name: "Robotics?", type: "checkbox", options: checkbox_field_options },
+    { name: "Paper Contribution", type: "multilineText" },
     { name: "Key Push", type: "multipleRecordLinks", options: { linkedTableId: pushes_table_id } },
     { name: "Artifact", type: "url" },
   ];
@@ -60,12 +61,21 @@ function arxiv_pdf_url(paper) {
   return `https://arxiv.org/pdf/${paper.arxiv_id}`;
 }
 
+function paper_is_from_robotics(paper) {
+  return new Set([
+    paper.source_feed_category_code,
+    paper.primary_arxiv_category_code,
+    ...(paper.arxiv_category_codes ?? []),
+  ]).has("cs.RO");
+}
+
 function paper_record_fields(paper) {
   return {
     "Paper Name": paper.title,
     Link: arxiv_pdf_url(paper),
     "Useful?": false,
-    "Robotics?": false,
+    "Robotics?": paper_is_from_robotics(paper),
+    "Paper Contribution": "",
     Artifact: null,
   };
 }

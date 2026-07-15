@@ -101,7 +101,8 @@ restricted to that base with `data.records:write`, `schema.bases:read`, and
 Paste the token and either the base URL or its `app…` ID into the Airtable rows
 in Settings. On the first crossed paper, paperman creates a `Reading Notes`
 table and a linked `Pushes` table. Reading Notes has your paper name, link,
-usefulness and robotics checkboxes, key push, and artifact-link columns.
+usefulness and robotics checkboxes, paper contribution, key push, and
+artifact-link columns. Robotics is checked automatically for `cs.RO` papers.
 Pressing `x` again removes the same Airtable record.
 
 The token is a local write credential. Keep it in Settings only and do not
