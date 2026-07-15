@@ -61,7 +61,7 @@ test("the first crossed paper creates a missing Airtable Papers table", async ()
   const requests = [];
   globalThis.fetch = async (requested_url, options) => {
     requests.push({ requested_url, options });
-    if (requests.length === 1) return { ok: false, status: 404, text: async () => JSON.stringify({ error: { type: "MODEL_NOT_FOUND", message: "Could not find table" } }) };
+    if (requests.length === 1) return { ok: false, status: 403, text: async () => JSON.stringify({ error: { type: "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message: "Could not find table" } }) };
     return { ok: true };
   };
   try {

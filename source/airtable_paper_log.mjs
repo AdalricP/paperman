@@ -88,7 +88,9 @@ async function create_paper_record({ airtable_personal_access_token, airtable_ba
   }
   if (create_record_response.ok) return { was_created: true, table_was_missing: false };
   const error_details = response_error_details(await create_record_response.text());
-  if (error_details.error_type === "MODEL_NOT_FOUND") return { was_created: false, table_was_missing: true };
+  if (new Set(["MODEL_NOT_FOUND", "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"]).has(error_details.error_type)) {
+    return { was_created: false, table_was_missing: true };
+  }
   throw new Error(`could not add paper to Airtable (HTTP ${create_record_response.status})${error_details.message ? `: ${error_details.message}` : ""}`);
 }
 
