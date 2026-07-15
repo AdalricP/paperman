@@ -47,6 +47,7 @@ later from the in-app settings screen.
 | `→` (or `s`) | open settings |
 | `←` (or `s`/`esc`) | return from settings |
 | `r` | re-fetch and re-rank today's list |
+| `e` | show full request diagnostics after a failure |
 | `q` | quit |
 
 Crossing out a paper only hides it from future selections. It does not affect

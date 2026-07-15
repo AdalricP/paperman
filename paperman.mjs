@@ -67,6 +67,7 @@ const user_interface_state = {
   settings_rows: [],
   settings_cursor_index: 0,
   settings_scroll_offset: 0,
+  error_details_scroll_offset: 0,
   expanded_category_group_codes: initial_expanded_category_group_codes(home_files.read_settings().tracked_arxiv_category_codes),
   text_input: null,
   status_message: null,
@@ -374,6 +375,23 @@ function footer_status_text() {
   return `${warning_text}${category_change_hint}${status_text}`;
 }
 
+function wrapped_plain_text_lines(text, maximum_line_width) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const wrapped_lines = [];
+  let current_line = "";
+  for (const word of words) {
+    const next_line = current_line ? `${current_line} ${word}` : word;
+    if (next_line.length <= maximum_line_width || !current_line) {
+      current_line = next_line;
+      continue;
+    }
+    wrapped_lines.push(current_line);
+    current_line = word;
+  }
+  if (current_line) wrapped_lines.push(current_line);
+  return wrapped_lines;
+}
+
 function render_paper_list_screen() {
   const terminal_column_count = process.stdout.columns || 80;
   const content_height = visible_content_height();
@@ -397,7 +415,8 @@ function render_paper_list_screen() {
 
   const reason_text = selected_paper()?.language_model_selection_reason ?? "";
   const reason_footer_line = ` ${ansi_dim}${fit_text_to_width(reason_text ? `↳ ${reason_text}` : "", Math.max(8, terminal_column_count - 2)).trimEnd()}${ansi_reset}`;
-  const key_hints = "↑↓ · enter open · x hide · g calendar · → settings · r refresh · q";
+  const diagnostics_hint = user_interface_state.warnings.length > 0 ? " · e error details" : "";
+  const key_hints = `↑↓ · enter open · x hide · g calendar · → settings · r refresh${diagnostics_hint} · q`;
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${key_hints}${ansi_reset}`;
   write_screen_frame(lines, [reason_footer_line, hints_footer_line]);
 }
@@ -426,6 +445,28 @@ function render_settings_screen() {
   const browsing_hints = "↑↓ move · space toggle/edit · ← back";
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${user_interface_state.text_input ? editing_hints : browsing_hints}${ansi_reset}`;
   write_screen_frame(lines, ["", hints_footer_line]);
+}
+
+function error_details_lines(terminal_column_count) {
+  const warning_lines = user_interface_state.warnings.flatMap((warning_text) =>
+    wrapped_plain_text_lines(warning_text, Math.max(20, terminal_column_count - 4))
+  );
+  return [
+    ` ${application_title_style}Request diagnostics${ansi_reset}`,
+    ` ${tree_spine_style}│${ansi_reset}`,
+    ...warning_lines.map((warning_line) => ` ${tree_spine_style}└─${ansi_reset} ${warning_style}${warning_line}${ansi_reset}`),
+  ];
+}
+
+function render_error_details_screen() {
+  const terminal_column_count = process.stdout.columns || 80;
+  const content_height = visible_content_height();
+  const lines = error_details_lines(terminal_column_count);
+  const maximum_scroll_offset = Math.max(0, lines.length - content_height);
+  user_interface_state.error_details_scroll_offset = Math.min(user_interface_state.error_details_scroll_offset, maximum_scroll_offset);
+  const visible_lines = lines.slice(user_interface_state.error_details_scroll_offset, user_interface_state.error_details_scroll_offset + content_height);
+  while (visible_lines.length < content_height) visible_lines.push("");
+  write_screen_frame(visible_lines, ["", ` ${ansi_dim}↑↓ scroll · e/esc/← back · q quit${ansi_reset}`]);
 }
 
 const wizard_step_glyph_by_state = {
@@ -545,6 +586,10 @@ function render() {
     render_settings_screen();
     return;
   }
+  if (user_interface_state.active_screen === "error_details") {
+    render_error_details_screen();
+    return;
+  }
   if (!user_interface_state.daily_selection) {
     render_loading_screen();
     return;
@@ -560,6 +605,16 @@ function open_settings_screen() {
 }
 
 function close_settings_screen() {
+  user_interface_state.active_screen = "paper_list";
+}
+
+function open_error_details_screen() {
+  if (user_interface_state.warnings.length === 0) return;
+  user_interface_state.error_details_scroll_offset = 0;
+  user_interface_state.active_screen = "error_details";
+}
+
+function close_error_details_screen() {
   user_interface_state.active_screen = "paper_list";
 }
 
@@ -662,6 +717,22 @@ function handle_paper_list_key(pressed_key) {
   if (pressed_key.name === "g") open_reading_session_calendar_link();
   if (pressed_key.name === "right" || pressed_key.name === "s") open_settings_screen();
   if (pressed_key.name === "r") regenerate_daily_selection();
+  if (pressed_key.name === "e") open_error_details_screen();
+}
+
+function handle_error_details_key(pressed_key) {
+  if (pressed_key.name === "q") quit();
+  if (pressed_key.name === "up" || pressed_key.name === "k") {
+    user_interface_state.error_details_scroll_offset = Math.max(0, user_interface_state.error_details_scroll_offset - 1);
+  }
+  if (pressed_key.name === "down" || pressed_key.name === "j") {
+    const error_detail_lines = error_details_lines(process.stdout.columns || 80);
+    user_interface_state.error_details_scroll_offset = Math.min(
+      Math.max(0, error_detail_lines.length - visible_content_height()),
+      user_interface_state.error_details_scroll_offset + 1
+    );
+  }
+  if (pressed_key.name === "e" || pressed_key.name === "escape" || pressed_key.name === "left") close_error_details_screen();
 }
 
 function enter_alternate_screen() {
@@ -694,6 +765,11 @@ function handle_keypress(typed_character, pressed_key) {
   }
   if (user_interface_state.active_screen === "settings") {
     handle_settings_key(pressed_key);
+    render();
+    return;
+  }
+  if (user_interface_state.active_screen === "error_details") {
+    handle_error_details_key(pressed_key);
     render();
     return;
   }

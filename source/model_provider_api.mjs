@@ -3,6 +3,15 @@ const maximum_abstract_characters_sent_to_language_model = 700;
 const language_model_sampling_temperature = 0.2;
 const language_model_maximum_output_tokens = 8000;
 
+function readable_openrouter_error_text(error_body_text) {
+  try {
+    const parsed_error_body = JSON.parse(error_body_text);
+    return parsed_error_body?.error?.message ?? parsed_error_body?.message ?? error_body_text;
+  } catch {
+    return error_body_text;
+  }
+}
+
 async function provider_json_request({ endpoint_url, api_key, request_payload }) {
   const api_response = await fetch(endpoint_url, {
     method: "POST",
@@ -14,7 +23,8 @@ async function provider_json_request({ endpoint_url, api_key, request_payload })
   });
   if (!api_response.ok) {
     const error_body_text = await api_response.text();
-    throw new Error(`OpenRouter request failed (HTTP ${api_response.status}): ${error_body_text.slice(0, 300)}`);
+    const readable_error_text = readable_openrouter_error_text(error_body_text);
+    throw new Error(`OpenRouter request failed (HTTP ${api_response.status}): ${readable_error_text.slice(0, 1000)}`);
   }
   return api_response.json();
 }
