@@ -42,7 +42,7 @@ later from the in-app settings screen.
 | --- | --- |
 | `↑`/`↓` (or `k`/`j`) | move selection |
 | `enter` | open the paper on arxiv.org |
-| `x` | cross out — hide this paper from future selections (press again to unmark) |
+| `x` | cross as read (press again to unmark) |
 | `g` | block a 1-hour reading session in Google Calendar |
 | `→` (or `s`) | open settings |
 | `←` (or `s`/`esc`) | return from settings |
@@ -50,8 +50,8 @@ later from the in-app settings screen.
 | `e` | show full request diagnostics after a failure |
 | `q` | quit |
 
-Crossing out a paper only hides it from future selections. It does not affect
-how other papers are ranked.
+Crossing a paper marks it as read in today's list and prevents it from being
+picked again later. It does not affect how other papers are ranked.
 
 ## How the ranking works
 

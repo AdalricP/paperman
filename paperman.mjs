@@ -416,7 +416,7 @@ function render_paper_list_screen() {
   const reason_text = selected_paper()?.language_model_selection_reason ?? "";
   const reason_footer_line = ` ${ansi_dim}${fit_text_to_width(reason_text ? `↳ ${reason_text}` : "", Math.max(8, terminal_column_count - 2)).trimEnd()}${ansi_reset}`;
   const diagnostics_hint = user_interface_state.warnings.length > 0 ? " · e error details" : "";
-  const key_hints = `↑↓ · enter open · x hide · g calendar · → settings · r refresh${diagnostics_hint} · q`;
+  const key_hints = `↑↓ · enter open · x cross read · g calendar · → settings · r refresh${diagnostics_hint} · q`;
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${key_hints}${ansi_reset}`;
   write_screen_frame(lines, [reason_footer_line, hints_footer_line]);
 }
@@ -606,6 +606,7 @@ function open_settings_screen() {
 
 function close_settings_screen() {
   user_interface_state.active_screen = "paper_list";
+  if (user_interface_state.have_tracked_categories_changed) regenerate_daily_selection();
 }
 
 function open_error_details_screen() {

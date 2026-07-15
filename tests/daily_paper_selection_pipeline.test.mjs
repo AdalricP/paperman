@@ -46,11 +46,12 @@ const quota_honoring_request_pick = async (prompt_text) => {
 const in_memory_pipeline_dependencies = ({
   existing_daily_selection = null,
   marked_papers_by_arxiv_id = {},
+  existing_candidate_papers_by_arxiv_id = {},
   papers_by_category = { "cs.LG": [feed_paper("2607.00001", "cs.LG"), feed_paper("2607.00002", "cs.LG")] },
   papers_per_category_per_day = undefined,
   request_pick,
 } = {}) => {
-  const call_log = { fetched_categories: [], pick_prompts: [], progress_messages: [], written_daily_selections: [] };
+  const call_log = { fetched_categories: [], pick_prompts: [], progress_messages: [], written_candidate_pools: [], written_daily_selections: [] };
   return {
     call_log,
     dependencies: {
@@ -65,6 +66,8 @@ const in_memory_pipeline_dependencies = ({
       read_daily_selection: () => existing_daily_selection,
       write_daily_selection: (daily_selection) => call_log.written_daily_selections.push(daily_selection),
       read_mark_history: () => marked_papers_by_arxiv_id,
+      read_candidate_pool: () => existing_candidate_papers_by_arxiv_id,
+      write_candidate_pool: (candidate_papers_by_arxiv_id) => call_log.written_candidate_pools.push(candidate_papers_by_arxiv_id),
       fetch_papers_for_category: async (category_code) => {
         call_log.fetched_categories.push(category_code);
         const papers = papers_by_category[category_code];
@@ -138,6 +141,28 @@ test("crossed-out papers are excluded from candidates", async () => {
   });
   const { daily_selection } = await daily_paper_selection_for_date(dependencies);
   assert.deepEqual(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id), ["2607.00002"]);
+});
+
+test("untracked categories cannot return from the retained candidate pool", async () => {
+  const physics_paper = {
+    ...feed_paper("2607.60001", "physics"),
+    source_feed_category_code: "physics",
+    first_seen_date_iso: "2026-07-15",
+  };
+  const { call_log, dependencies } = in_memory_pipeline_dependencies({
+    papers_by_category: {
+      "cs.LG": [
+        feed_paper("2607.61001", "cs.LG"),
+        feed_paper("2607.61002", "cs.LG"),
+        feed_paper("2607.61003", "cs.LG"),
+      ],
+    },
+    existing_candidate_papers_by_arxiv_id: { [physics_paper.arxiv_id]: physics_paper },
+    papers_per_category_per_day: 2,
+  });
+  const { daily_selection } = await daily_paper_selection_for_date(dependencies);
+  assert.ok(daily_selection.selected_papers.every((selected_paper) => selected_paper.source_feed_category_code === "cs.LG"));
+  assert.equal(call_log.written_candidate_pools[0][physics_paper.arxiv_id], undefined);
 });
 
 test("completed marks do not affect the candidate pool", async () => {

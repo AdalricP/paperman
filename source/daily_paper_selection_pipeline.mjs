@@ -105,9 +105,13 @@ export function candidate_pool_after_merging_fetched_papers({ existing_candidate
   return candidate_papers_by_arxiv_id;
 }
 
-function candidate_papers_with_recency({ candidate_papers_by_arxiv_id, current_date_iso, excluded_arxiv_ids }) {
+function candidate_papers_with_recency({ candidate_papers_by_arxiv_id, current_date_iso, excluded_arxiv_ids, tracked_arxiv_category_codes }) {
+  const tracked_category_codes = new Set(tracked_arxiv_category_codes);
   return Object.values(candidate_papers_by_arxiv_id)
-    .filter((candidate_paper) => !excluded_arxiv_ids.has(candidate_paper.arxiv_id))
+    .filter(
+      (candidate_paper) =>
+        tracked_category_codes.has(candidate_paper.source_feed_category_code) && !excluded_arxiv_ids.has(candidate_paper.arxiv_id)
+    )
     .map((candidate_paper) => {
       const age_in_days = age_in_days_since_first_seen(candidate_paper.first_seen_date_iso, current_date_iso);
       return { ...candidate_paper, age_in_days, recency_score: Math.max(0, 1 - age_in_days / recency_score_full_age_in_days) };
@@ -336,6 +340,7 @@ export async function daily_paper_selection_for_date({
     candidate_papers_by_arxiv_id,
     current_date_iso,
     excluded_arxiv_ids: new Set([...crossed_out_arxiv_ids, ...currently_selected_arxiv_ids]),
+    tracked_arxiv_category_codes: settings.tracked_arxiv_category_codes,
   });
   const round_robin_candidate_papers = papers_in_round_robin_across_categories({
     papers: pooled_candidate_papers,
@@ -370,7 +375,12 @@ export async function daily_paper_selection_for_date({
   write_daily_selection(daily_selection);
   const selected_arxiv_ids = new Set(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id));
   const unselected_unmarked_candidate_papers_by_arxiv_id = Object.fromEntries(
-    Object.entries(candidate_papers_by_arxiv_id).filter(([arxiv_id]) => !selected_arxiv_ids.has(arxiv_id) && !crossed_out_arxiv_ids.has(arxiv_id))
+    Object.entries(candidate_papers_by_arxiv_id).filter(
+      ([arxiv_id, candidate_paper]) =>
+        settings.tracked_arxiv_category_codes.includes(candidate_paper.source_feed_category_code) &&
+        !selected_arxiv_ids.has(arxiv_id) &&
+        !crossed_out_arxiv_ids.has(arxiv_id)
+    )
   );
   write_candidate_pool(unselected_unmarked_candidate_papers_by_arxiv_id, current_date_iso);
 
