@@ -35,19 +35,15 @@ export function build_daily_pick_prompt({
   interests_blurb_text,
   reading_intent_blurb_text,
   candidate_papers,
-  candidate_relevance_scores,
   selection_target_by_category_code,
 }) {
-  const candidate_lines = candidate_papers.map((candidate_paper, candidate_index) =>
+  const candidate_lines = candidate_papers.map((candidate_paper) =>
     JSON.stringify({
       arxiv_id: candidate_paper.arxiv_id,
       title: candidate_paper.title,
       abstract: candidate_paper.abstract_text.slice(0, maximum_abstract_characters_sent_to_language_model),
       quota_category: candidate_paper.source_feed_category_code,
       categories: candidate_paper.arxiv_category_codes,
-      local_relevance_score: candidate_relevance_scores
-        ? Number(candidate_relevance_scores[candidate_index].toFixed(3))
-        : null,
       age_in_days: candidate_paper.age_in_days,
     })
   );
@@ -62,8 +58,7 @@ export function build_daily_pick_prompt({
     `Their interests: ${interests_line}`,
     `Their current goal: ${reading_intent_line}`,
     "",
-    "local_relevance_score (0-1, null on cold start) comes from a recommender trained on papers they previously finished versus dismissed. Treat it as a strong prior, but override it when a paper clearly matches or clashes with the stated interests and goal.",
-    "Prefer newer papers; an older paper must clearly beat newer ones on relevance.",
+    "Prefer newer papers. Only choose an older paper when it clearly fits the stated interests and goal better.",
     "",
     "Candidate papers, one JSON object per line:",
     ...candidate_lines,

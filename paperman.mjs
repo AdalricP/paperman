@@ -47,7 +47,7 @@ const section_heading_style = "\x1b[1;38;2;97;175;255m";
 const tree_spine_style = "\x1b[38;2;95;95;115m";
 const arxiv_id_style = "\x1b[38;2;140;140;165m";
 const category_code_style = "\x1b[38;2;229;192;123m";
-const completed_glyph_style = "\x1b[38;2;120;220;120m";
+const confirmation_glyph_style = "\x1b[38;2;120;220;120m";
 const crossed_out_glyph_style = "\x1b[38;2;255;110;110m";
 const warning_style = "\x1b[38;2;255;110;110m";
 
@@ -205,26 +205,26 @@ function open_reading_session_calendar_link() {
   user_interface_state.status_message = "reading session sent to Google Calendar";
 }
 
-function toggle_mark_on_selected_paper(mark_kind) {
+function toggle_crossed_out_mark_on_selected_paper() {
   const paper = selected_paper();
   if (!paper) return;
   const marks_by_arxiv_id = user_interface_state.daily_selection.mark_by_arxiv_id;
-  const is_already_marked_this_kind = marks_by_arxiv_id[paper.arxiv_id] === mark_kind;
+  const is_already_crossed_out = marks_by_arxiv_id[paper.arxiv_id] === "crossed_out";
 
-  if (is_already_marked_this_kind) {
+  if (is_already_crossed_out) {
     delete marks_by_arxiv_id[paper.arxiv_id];
     home_files.remove_mark(paper.arxiv_id);
     home_files.write_daily_selection(user_interface_state.daily_selection);
     return;
   }
 
-  marks_by_arxiv_id[paper.arxiv_id] = mark_kind;
+  marks_by_arxiv_id[paper.arxiv_id] = "crossed_out";
   home_files.upsert_mark({
     arxiv_id: paper.arxiv_id,
     title: paper.title,
     abstract_text: paper.abstract_text,
     primary_arxiv_category_code: paper.primary_arxiv_category_code,
-    mark_kind,
+    mark_kind: "crossed_out",
     marked_at_iso: new Date().toISOString(),
   });
   home_files.write_daily_selection(user_interface_state.daily_selection);
@@ -247,7 +247,6 @@ async function regenerate_daily_selection() {
 }
 
 function mark_glyph_cell(mark_kind) {
-  if (mark_kind === "completed") return `${completed_glyph_style}✓${ansi_reset} `;
   if (mark_kind === "crossed_out") return `${crossed_out_glyph_style}✗${ansi_reset} `;
   return "  ";
 }
@@ -398,7 +397,7 @@ function render_paper_list_screen() {
 
   const reason_text = selected_paper()?.language_model_selection_reason ?? "";
   const reason_footer_line = ` ${ansi_dim}${fit_text_to_width(reason_text ? `↳ ${reason_text}` : "", Math.max(8, terminal_column_count - 2)).trimEnd()}${ansi_reset}`;
-  const key_hints = "↑↓ · enter open · c done · x skip · g calendar · → settings · r refresh · q";
+  const key_hints = "↑↓ · enter open · x hide · g calendar · → settings · r refresh · q";
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${key_hints}${ansi_reset}`;
   write_screen_frame(lines, [reason_footer_line, hints_footer_line]);
 }
@@ -430,7 +429,7 @@ function render_settings_screen() {
 }
 
 const wizard_step_glyph_by_state = {
-  completed: `${completed_glyph_style}✓${ansi_reset}`,
+  completed: `${confirmation_glyph_style}✓${ansi_reset}`,
   active: `${application_title_style}●${ansi_reset}`,
   pending: `${tree_spine_style}○${ansi_reset}`,
 };
@@ -659,8 +658,7 @@ function handle_paper_list_key(pressed_key) {
     user_interface_state.selected_arxiv_id = arxiv_id_after_selection_move(user_interface_state.paper_list_rows, user_interface_state.selected_arxiv_id, 1);
   }
   if (pressed_key.name === "return") open_selected_paper_in_browser();
-  if (pressed_key.name === "c") toggle_mark_on_selected_paper("completed");
-  if (pressed_key.name === "x") toggle_mark_on_selected_paper("crossed_out");
+  if (pressed_key.name === "x") toggle_crossed_out_mark_on_selected_paper();
   if (pressed_key.name === "g") open_reading_session_calendar_link();
   if (pressed_key.name === "right" || pressed_key.name === "s") open_settings_screen();
   if (pressed_key.name === "r") regenerate_daily_selection();

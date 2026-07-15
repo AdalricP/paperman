@@ -17,8 +17,7 @@ Your daily arXiv top-10, in the terminal. Made to open with your morning coffee.
 ```
 
 Every day it pulls the newest papers from your tracked arXiv categories, ranks
-them with a recommender trained on what you finished vs. dismissed, has
-DeepSeek V4 Flash (via OpenRouter) pick the most relevant N per category for
+has DeepSeek V4 Flash (via OpenRouter) pick the most relevant N per category for
 your interests and goal, and freezes that list for the day.
 
 ## Install
@@ -43,25 +42,23 @@ later from the in-app settings screen.
 | --- | --- |
 | `↑`/`↓` (or `k`/`j`) | move selection |
 | `enter` | open the paper on arxiv.org |
-| `c` | mark completed — you read it (press again to unmark) |
-| `x` | cross out — not interested (press again to unmark) |
+| `x` | cross out — hide this paper from future selections (press again to unmark) |
 | `g` | block a 1-hour reading session in Google Calendar |
 | `→` (or `s`) | open settings |
 | `←` (or `s`/`esc`) | return from settings |
 | `r` | re-fetch and re-rank today's list |
 | `q` | quit |
 
-`c` and `x` are how paperman learns. Completed papers pull tomorrow's ranking
-toward them, crossed-out papers push it away.
+Crossing out a paper only hides it from future selections. It does not affect
+how other papers are ranked.
 
 ## How the ranking works
 
 1. All of today's announcements from your tracked categories are fetched from
    the official arXiv RSS feeds (`new` + cross-listed submissions only).
-2. Once you have enough completed and crossed-out papers, a lightweight
-   word-based classifier ranks candidates from that feedback. It uses no
-   downloaded local model or vector database. Papers you've already marked
-   never reappear.
+2. Crossed-out papers never reappear. All remaining candidates are ordered by
+   recency before the OpenRouter picker considers their title, abstract,
+   interests, and goal.
 3. The top candidates per category go to the chat model (default
    `deepseek/deepseek-v4-flash` via OpenRouter) with your categories, interests
    blurb, and goal; it picks the final N per category — "papers per category"
@@ -73,8 +70,8 @@ Papers remain in a short-lived candidate pool for up to 21 days. Newer papers
 are preferred, while older papers can still win when their relevance is clearly
 stronger.
 
-On a fresh install there's no history yet, so the first lists lean on your
-blurbs alone; the recommender wakes up as you mark papers.
+The first lists lean on your interests and goal, while still favoring newer
+papers.
 
 ## Configuration
 
@@ -82,7 +79,7 @@ Everything lives in `~/.paperman` (override with `PAPERMAN_HOME`):
 
 - `settings.json` — categories, blurbs, keys, model ids
 - `daily_selection.json` — today's frozen 10 + marks
-- `mark_history.json` — your completed/crossed history (the training data)
+- `mark_history.json` — papers you crossed out, used only as an exclusion list
 - `candidate_pool.json` — unselected recent papers, retained for soft recency
   ranking
 

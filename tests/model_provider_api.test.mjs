@@ -12,6 +12,7 @@ const candidate_paper = (arxiv_id, source_feed_category_code) => ({
   abstract_text: `Abstract ${arxiv_id}`,
   arxiv_category_codes: [source_feed_category_code],
   source_feed_category_code,
+  age_in_days: 0,
 });
 
 test("prompt carries categories, blurbs, candidates and per-category quotas", () => {
@@ -20,7 +21,6 @@ test("prompt carries categories, blurbs, candidates and per-category quotas", ()
     interests_blurb_text: "world models",
     reading_intent_blurb_text: "write a blog post weekly",
     candidate_papers: [candidate_paper("2607.00001", "cs.LG")],
-    candidate_relevance_scores: [0.7315],
     selection_target_by_category_code: { "cs.LG": 3, "cs.RO": 2 },
   });
   assert.match(prompt_text, /cs\.LG, cs\.RO/);
@@ -28,21 +28,20 @@ test("prompt carries categories, blurbs, candidates and per-category quotas", ()
   assert.match(prompt_text, /write a blog post weekly/);
   assert.match(prompt_text, /"arxiv_id":"2607\.00001"/);
   assert.match(prompt_text, /"quota_category":"cs\.LG"/);
-  assert.match(prompt_text, /0\.732/);
+  assert.match(prompt_text, /"age_in_days":/);
   assert.match(prompt_text, /exactly these counts \(total 5\): cs\.LG: 3 · cs\.RO: 2/);
 });
 
-test("prompt marks missing blurbs and cold-start scores", () => {
+test("prompt marks missing blurbs without a feedback score", () => {
   const prompt_text = build_daily_pick_prompt({
     tracked_arxiv_category_codes: ["cs.LG"],
     interests_blurb_text: "",
     reading_intent_blurb_text: "",
     candidate_papers: [candidate_paper("2607.00001", "cs.LG")],
-    candidate_relevance_scores: null,
     selection_target_by_category_code: { "cs.LG": 1 },
   });
   assert.match(prompt_text, /Their interests: \(not provided\)/);
-  assert.match(prompt_text, /"local_relevance_score":null/);
+  assert.doesNotMatch(prompt_text, /local_relevance_score/);
 });
 
 test("total selection target sums the per-category quotas", () => {

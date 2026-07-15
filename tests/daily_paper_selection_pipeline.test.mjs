@@ -50,7 +50,7 @@ const in_memory_pipeline_dependencies = ({
   papers_per_category_per_day = undefined,
   request_pick,
 } = {}) => {
-  const call_log = { fetched_categories: [], embedded_text_batches: [], pick_prompts: [], written_daily_selections: [] };
+  const call_log = { fetched_categories: [], pick_prompts: [], written_daily_selections: [] };
   return {
     call_log,
     dependencies: {
@@ -94,9 +94,7 @@ test("cold start selects without local scores and freezes reasons", async () => 
   assert.equal(daily_selection.selection_date_iso, "2026-07-15");
   assert.equal(daily_selection.arxiv_announcement_date_iso, "2026-07-14");
   assert.equal(daily_selection.selected_papers.length, 2);
-  assert.equal(daily_selection.selected_papers[0].local_relevance_score, null);
   assert.match(daily_selection.selected_papers[0].language_model_selection_reason, /reason for/);
-  assert.equal("abstract_embedding_vector" in daily_selection.selected_papers[0], false);
   assert.deepEqual(warnings, []);
   assert.deepEqual(call_log.written_daily_selections, [daily_selection]);
 });
@@ -118,33 +116,25 @@ test("the per-category quota caps how many papers each category contributes", as
   assert.deepEqual(selected_counts, { "cs.LG": 2, "cs.RO": 1 });
 });
 
-test("marked papers are excluded from candidates", async () => {
+test("crossed-out papers are excluded from candidates", async () => {
   const { dependencies } = in_memory_pipeline_dependencies({
     marked_papers_by_arxiv_id: {
-      "2607.00001": { arxiv_id: "2607.00001", title: "T", abstract_text: "A", mark_kind: "completed", marked_at_iso: "2026-07-14T00:00:00.000Z" },
+      "2607.00001": { arxiv_id: "2607.00001", title: "T", abstract_text: "A", mark_kind: "crossed_out", marked_at_iso: "2026-07-14T00:00:00.000Z" },
     },
   });
   const { daily_selection } = await daily_paper_selection_for_date(dependencies);
   assert.deepEqual(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id), ["2607.00002"]);
 });
 
-test("enough feedback trains the lightweight word classifier", async () => {
+test("completed marks do not affect the candidate pool", async () => {
   const { dependencies } = in_memory_pipeline_dependencies({
-    papers_by_category: { "cs.RO": [feed_paper("2607.00010", "cs.RO"), { ...feed_paper("2607.00011", "cs.RO"), abstract_text: "robot grasping study" }] },
+    papers_by_category: { "cs.RO": [feed_paper("2607.00010", "cs.RO"), feed_paper("2607.00011", "cs.RO")] },
     marked_papers_by_arxiv_id: {
-      completed_one: { arxiv_id: "completed_one", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-01T00:00:00.000Z" },
-      completed_two: { arxiv_id: "completed_two", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-02T00:00:00.000Z" },
-      completed_three: { arxiv_id: "completed_three", title: "robot paper", abstract_text: "robot learning", mark_kind: "completed", marked_at_iso: "2026-07-03T00:00:00.000Z" },
-      crossed_one: { arxiv_id: "crossed_one", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-04T00:00:00.000Z" },
-      crossed_two: { arxiv_id: "crossed_two", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-05T00:00:00.000Z" },
-      crossed_three: { arxiv_id: "crossed_three", title: "astronomy paper", abstract_text: "astronomy observations", mark_kind: "crossed_out", marked_at_iso: "2026-07-06T00:00:00.000Z" },
+      "2607.00010": { arxiv_id: "2607.00010", title: "old mark", abstract_text: "old mark", mark_kind: "completed", marked_at_iso: "2026-07-01T00:00:00.000Z" },
     },
   });
   const { daily_selection } = await daily_paper_selection_for_date(dependencies);
-  const score_by_arxiv_id = new Map(
-    daily_selection.selected_papers.map((selected_paper) => [selected_paper.arxiv_id, selected_paper.local_relevance_score])
-  );
-  assert.ok(score_by_arxiv_id.get("2607.00011") > score_by_arxiv_id.get("2607.00010"));
+  assert.deepEqual(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id), ["2607.00010", "2607.00011"]);
 });
 
 test("a failing feed degrades to a warning while others proceed", async () => {

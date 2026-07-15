@@ -47,7 +47,6 @@ test("marks upsert and remove from history", () => {
       primary_arxiv_category_code: "cs.LG",
       mark_kind: "completed",
       marked_at_iso: "2026-07-15T09:00:00.000Z",
-      abstract_embedding_vector: [1, 0],
     };
     home_files.upsert_mark(marked_paper);
     assert.deepEqual(home_files.read_mark_history()["2607.00001"], marked_paper);
@@ -58,7 +57,7 @@ test("marks upsert and remove from history", () => {
   });
 });
 
-test("pruning caps history at 1000 marks and embeddings at the newest 400", () => {
+test("pruning caps history at 1000 marks", () => {
   const synthetic_marked_papers = Object.fromEntries(
     Array.from({ length: 1200 }, (_unused, mark_index) => [
       `2607.${String(mark_index).padStart(5, "0")}`,
@@ -66,16 +65,13 @@ test("pruning caps history at 1000 marks and embeddings at the newest 400", () =
         arxiv_id: `2607.${String(mark_index).padStart(5, "0")}`,
         mark_kind: "completed",
         marked_at_iso: new Date(Date.UTC(2026, 0, 1) + mark_index * 60_000).toISOString(),
-        abstract_embedding_vector: [1, 0],
       },
     ])
   );
   const pruned_marked_papers = Object.values(pruned_mark_history(synthetic_marked_papers));
   assert.equal(pruned_marked_papers.length, 1000);
-  const marks_with_embeddings = pruned_marked_papers.filter((marked_paper) => marked_paper.abstract_embedding_vector);
-  assert.equal(marks_with_embeddings.length, 400);
   const newest_mark = pruned_marked_papers.find((marked_paper) => marked_paper.arxiv_id === "2607.01199");
-  assert.ok(newest_mark.abstract_embedding_vector);
+  assert.equal(newest_mark.mark_kind, "completed");
 });
 
 test("candidate pool drops papers older than twenty-one days", () => {

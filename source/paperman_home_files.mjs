@@ -13,7 +13,6 @@ export const default_settings = {
 };
 
 const maximum_marked_papers_kept_in_history = 1000;
-const maximum_marked_papers_kept_with_embedding_vectors = 400;
 const maximum_candidate_pool_age_in_days = 21;
 
 export function paperman_home_directory_path() {
@@ -26,12 +25,7 @@ export function pruned_mark_history(marked_papers_by_arxiv_id) {
       String(second_marked_paper.marked_at_iso).localeCompare(String(first_marked_paper.marked_at_iso))
   );
 
-  const kept_entries = marked_paper_entries_newest_first
-    .slice(0, maximum_marked_papers_kept_in_history)
-    .map(([arxiv_id, marked_paper], recency_rank) => {
-      if (recency_rank < maximum_marked_papers_kept_with_embedding_vectors) return [arxiv_id, marked_paper];
-      return [arxiv_id, { ...marked_paper, abstract_embedding_vector: null }];
-    });
+  const kept_entries = marked_paper_entries_newest_first.slice(0, maximum_marked_papers_kept_in_history);
 
   return Object.fromEntries(kept_entries);
 }
