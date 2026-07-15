@@ -39,6 +39,7 @@ const quota_honoring_request_pick = async (prompt_text) => {
     selected_papers: picked_candidates.map((candidate) => ({
       arxiv_id: candidate.arxiv_id,
       selection_reason: `reason for ${candidate.arxiv_id}`,
+      paper_contribution: `contribution for ${candidate.arxiv_id}`,
     })),
   });
 };
@@ -98,6 +99,7 @@ test("cold start selects without local scores and freezes reasons", async () => 
   assert.equal(daily_selection.arxiv_announcement_date_iso, "2026-07-14");
   assert.equal(daily_selection.selected_papers.length, 2);
   assert.match(daily_selection.selected_papers[0].language_model_selection_reason, /reason for/);
+  assert.match(daily_selection.selected_papers[0].language_model_paper_contribution, /contribution for/);
   assert.deepEqual(warnings, []);
   assert.deepEqual(call_log.written_daily_selections, [daily_selection]);
 });

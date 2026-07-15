@@ -2,6 +2,7 @@ const openrouter_chat_completions_url = "https://openrouter.ai/api/v1/chat/compl
 const maximum_abstract_characters_sent_to_language_model = 350;
 const language_model_sampling_temperature = 0.2;
 const language_model_maximum_output_tokens = 8000;
+const maximum_paper_contribution_characters = 280;
 
 function readable_openrouter_error_text(error_body_text) {
   try {
@@ -74,13 +75,14 @@ export function build_daily_pick_prompt({
     `Their current goal: ${reading_intent_line}`,
     "",
     "Prefer newer papers. Only choose an older paper when it clearly fits the stated interests and goal better.",
+    "For every selected paper, give a candid paper_contribution of at most 25 words: what it actually contributes. If it seems incremental or merely applies known methods, say that plainly but fairly.",
     "",
     "Candidate papers, one JSON object per line:",
     ...candidate_lines,
     "",
     `Select the best papers per quota_category, exactly these counts (total ${total_selection_target(selection_target_by_category_code)}): ${quota_summary_text(selection_target_by_category_code)}.`,
     "Respond with JSON only:",
-    '{"selected_papers": [{"arxiv_id": "...", "selection_reason": "one concrete line on why this paper is worth their time today"}]}',
+    '{"selected_papers": [{"arxiv_id": "...", "selection_reason": "one concrete line on why this paper is worth their time today", "paper_contribution": "at most 25 words on the paper’s actual contribution"}]}',
   ].join("\n");
 }
 
@@ -126,6 +128,9 @@ export function validated_picks_in_daily_pick_response({ response_text, candidat
   return selected_papers.map((selected_paper) => ({
     arxiv_id: selected_paper.arxiv_id,
     selection_reason: selected_paper.selection_reason.trim(),
+    paper_contribution: typeof selected_paper.paper_contribution === "string"
+      ? selected_paper.paper_contribution.replace(/\s+/g, " ").trim().slice(0, maximum_paper_contribution_characters)
+      : "",
   }));
 }
 

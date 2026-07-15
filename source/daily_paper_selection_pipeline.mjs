@@ -167,7 +167,7 @@ function fallback_picks({ pruned_papers, selection_target_by_category_code }) {
     const category_code = pruned_paper.source_feed_category_code;
     if ((remaining_target_by_category[category_code] ?? 0) === 0) return [];
     remaining_target_by_category[category_code] -= 1;
-    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: fallback_reason }];
+    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: fallback_reason, paper_contribution: "" }];
   });
 }
 
@@ -189,7 +189,7 @@ function picks_completed_from_recency_order({ model_validated_picks, pruned_pape
     const category_code = pruned_paper.source_feed_category_code;
     if (picked_arxiv_ids.has(pruned_paper.arxiv_id) || (remaining_count_by_category_code[category_code] ?? 0) === 0) return [];
     remaining_count_by_category_code[category_code] -= 1;
-    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: "selected in recency order to complete the category quota" }];
+    return [{ arxiv_id: pruned_paper.arxiv_id, selection_reason: "selected in recency order to complete the category quota", paper_contribution: "" }];
   });
   return [...model_validated_picks, ...recency_completion_picks];
 }
@@ -284,6 +284,7 @@ function frozen_daily_selection({
   const selected_papers = validated_picks.map((validated_pick) => ({
     ...pruned_paper_by_arxiv_id.get(validated_pick.arxiv_id),
     language_model_selection_reason: validated_pick.selection_reason,
+    language_model_paper_contribution: validated_pick.paper_contribution,
   }));
 
   const selected_arxiv_ids = new Set(selected_papers.map((selected_paper) => selected_paper.arxiv_id));

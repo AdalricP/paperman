@@ -75,7 +75,7 @@ function paper_record_fields(paper) {
     Link: arxiv_pdf_url(paper),
     "Useful?": false,
     "Robotics?": paper_is_from_robotics(paper),
-    "Paper Contribution": "",
+    "Paper Contribution": paper.language_model_paper_contribution ?? "",
     Artifact: null,
   };
 }

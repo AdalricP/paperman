@@ -30,6 +30,7 @@ test("prompt carries categories, blurbs, candidates and per-category quotas", ()
   assert.match(prompt_text, /"arxiv_id":"2607\.00001"/);
   assert.match(prompt_text, /"quota_category":"cs\.LG"/);
   assert.match(prompt_text, /"age_in_days":/);
+  assert.match(prompt_text, /paper_contribution/);
   assert.match(prompt_text, /exactly these counts \(total 5\): cs\.LG: 3 · cs\.RO: 2/);
 });
 
@@ -102,15 +103,16 @@ test("validator accepts a response that meets every category quota", () => {
   const validated_picks = validate_daily_pick_response({
     ...validation_arguments,
     response_text: response_with([
-      { arxiv_id: "2607.00001", selection_reason: "matches the stated goal" },
-      { arxiv_id: "2607.00002", selection_reason: "strong local score" },
-      { arxiv_id: "2607.00003", selection_reason: "solid robotics result" },
+      { arxiv_id: "2607.00001", selection_reason: "matches the stated goal", paper_contribution: "introduces a practical control method" },
+      { arxiv_id: "2607.00002", selection_reason: "strong local score", paper_contribution: "benchmarks transfer across systems" },
+      { arxiv_id: "2607.00003", selection_reason: "solid robotics result", paper_contribution: "improves robot exploration safety" },
     ]),
   });
   assert.deepEqual(
     validated_picks.map((validated_pick) => validated_pick.arxiv_id),
     ["2607.00001", "2607.00002", "2607.00003"]
   );
+  assert.equal(validated_picks[0].paper_contribution, "introduces a practical control method");
 });
 
 test("validator rejects malformed and dishonest responses", () => {

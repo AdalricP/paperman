@@ -103,6 +103,8 @@ in Settings. On the first crossed paper, paperman creates a `Reading Notes`
 table and a linked `Pushes` table. Reading Notes has your paper name, link,
 usefulness and robotics checkboxes, paper contribution, key push, and
 artifact-link columns. Robotics is checked automatically for `cs.RO` papers.
+Paper Contribution is generated during the normal daily model pick, so crossing
+a paper does not trigger another model request.
 Pressing `x` again removes the same Airtable record.
 
 The token is a local write credential. Keep it in Settings only and do not

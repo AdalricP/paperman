@@ -23,6 +23,25 @@ test("reads an Airtable base ID from an ID or base URL", () => {
   assert.equal(airtable_base_id_from_input("not a base"), "");
 });
 
+test("the daily model contribution is copied into the Airtable reading note", async () => {
+  const original_fetch = globalThis.fetch;
+  let request_options;
+  globalThis.fetch = async (_requested_url, options) => {
+    request_options = options;
+    return { ok: true, json: async () => ({ id: "recExample" }) };
+  };
+  try {
+    await append_crossed_paper_to_airtable({
+      airtable_personal_access_token: airtable_token,
+      airtable_base_input: airtable_base_id,
+      paper: { ...paper, language_model_paper_contribution: "Turns a vision-only safety constraint into a multi-robot exploration planner." },
+    });
+    assert.equal(JSON.parse(request_options.body).fields["Paper Contribution"], "Turns a vision-only safety constraint into a multi-robot exploration planner.");
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
+});
+
 test("an incomplete Airtable connection leaves the local read mark alone", async () => {
   assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: "", airtable_base_input: airtable_base_id, paper }), false);
   assert.equal(await append_crossed_paper_to_airtable({ airtable_personal_access_token: airtable_token, airtable_base_input: "", paper }), false);
