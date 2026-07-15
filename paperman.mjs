@@ -394,22 +394,24 @@ function wrapped_plain_text_lines(text, maximum_line_width) {
 
 function render_paper_list_screen() {
   const terminal_column_count = process.stdout.columns || 80;
-  const content_height = visible_content_height();
   const rows = user_interface_state.paper_list_rows;
+  const [application_title_row, ...scrollable_rows] = rows;
+  const scrollable_content_height = Math.max(2, visible_content_height() - 1);
   const selected_row_index = selected_paper_row_index(rows, user_interface_state.selected_arxiv_id);
+  const selected_scrollable_row_index = Math.max(0, selected_row_index - 1);
 
   user_interface_state.paper_list_scroll_offset = clamped_scroll_offset({
     scroll_offset: user_interface_state.paper_list_scroll_offset,
-    target_row_index: selected_row_index,
-    row_count: rows.length,
-    content_height,
+    target_row_index: selected_scrollable_row_index,
+    row_count: scrollable_rows.length,
+    content_height: scrollable_content_height,
   });
 
   const column_widths = paper_list_column_widths(rows);
-  const lines = [];
-  for (let visible_row_index = 0; visible_row_index < content_height; visible_row_index++) {
-    const row = rows[user_interface_state.paper_list_scroll_offset + visible_row_index];
-    const absolute_row_index = user_interface_state.paper_list_scroll_offset + visible_row_index;
+  const lines = [render_paper_list_row(application_title_row, column_widths, terminal_column_count, false)];
+  for (let visible_row_index = 0; visible_row_index < scrollable_content_height; visible_row_index++) {
+    const row = scrollable_rows[user_interface_state.paper_list_scroll_offset + visible_row_index];
+    const absolute_row_index = user_interface_state.paper_list_scroll_offset + visible_row_index + 1;
     lines.push(row ? render_paper_list_row(row, column_widths, terminal_column_count, absolute_row_index === selected_row_index) : "");
   }
 

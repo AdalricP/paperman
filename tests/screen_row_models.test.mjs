@@ -29,7 +29,7 @@ test("selection defaults to the first paper and moves with clamping", () => {
 test("settings show a category tree, API key only, and a hard reset action", () => {
   const rows = build_settings_rows(settings_fixture);
   assert.ok(rows.some((row) => row.type === "category_group"));
-  assert.ok(rows.some((row) => row.type === "category_checkbox" && row.arxiv_category_code === "physics" && /whole archive/.test(row.label)));
+  assert.ok(rows.some((row) => row.type === "category_checkbox" && row.arxiv_category_code === "physics" && /all Physics categories/.test(row.label)));
   assert.deepEqual(rows.filter((row) => row.type === "text_setting").map((row) => row.setting_key), ["interests_blurb_text", "reading_intent_blurb_text", "papers_per_category_per_day", "openrouter_api_key"]);
   assert.equal(rows.filter((row) => row.type === "hard_reset_action").length, 1);
 });

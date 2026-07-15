@@ -280,7 +280,7 @@ export const arxiv_category_catalog = arxiv_category_groups.flatMap((category_gr
 
 const display_name_by_code = new Map([
   ...arxiv_category_catalog.map((catalog_entry) => [catalog_entry.arxiv_category_code, catalog_entry.display_name]),
-  ...arxiv_category_groups.map((category_group) => [category_group.archive_code, `${category_group.group_name} (whole archive)`]),
+  ...arxiv_category_groups.map((category_group) => [category_group.archive_code, `All ${category_group.group_name} categories`]),
 ]);
 
 export function display_name_for_arxiv_category_code(arxiv_category_code) {

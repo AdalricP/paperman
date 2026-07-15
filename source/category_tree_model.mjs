@@ -7,7 +7,7 @@ function legacy_whole_archive_leaf_when_tracked(category_group, tracked_arxiv_ca
     {
       type: "category_checkbox",
       arxiv_category_code: category_group.archive_code,
-      label: `${category_group.archive_code} — ${category_group.group_name} (whole archive)`,
+      label: `${category_group.archive_code} — all ${category_group.group_name} categories`,
       indentation_level: 1,
     },
   ];
