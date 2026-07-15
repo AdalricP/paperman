@@ -1,9 +1,7 @@
-const fireworks_embeddings_url = "https://api.fireworks.ai/inference/v1/embeddings";
 const openrouter_chat_completions_url = "https://openrouter.ai/api/v1/chat/completions";
-const embedding_texts_per_batch = 64;
 const maximum_abstract_characters_sent_to_language_model = 700;
 const language_model_sampling_temperature = 0.2;
-const language_model_maximum_output_tokens = 2000;
+const language_model_maximum_output_tokens = 8000;
 
 async function provider_json_request({ endpoint_url, api_key, request_payload }) {
   const api_response = await fetch(endpoint_url, {
@@ -19,21 +17,6 @@ async function provider_json_request({ endpoint_url, api_key, request_payload })
     throw new Error(`${endpoint_url} returned ${api_response.status}: ${error_body_text.slice(0, 300)}`);
   }
   return api_response.json();
-}
-
-export async function embed_paper_texts({ fireworks_api_key, fireworks_embedding_model_id, paper_texts }) {
-  if (!fireworks_api_key) throw new Error("no Fireworks key set — add one in settings to enable the embedding recommender");
-  const embedding_vectors = [];
-  for (let batch_start_index = 0; batch_start_index < paper_texts.length; batch_start_index += embedding_texts_per_batch) {
-    const batch_texts = paper_texts.slice(batch_start_index, batch_start_index + embedding_texts_per_batch);
-    const embeddings_response = await provider_json_request({
-      endpoint_url: fireworks_embeddings_url,
-      api_key: fireworks_api_key,
-      request_payload: { model: fireworks_embedding_model_id, input: batch_texts },
-    });
-    embedding_vectors.push(...embeddings_response.data.map((embedding_entry) => embedding_entry.embedding));
-  }
-  return embedding_vectors;
 }
 
 const quota_summary_text = (selection_target_by_category_code) =>
@@ -65,6 +48,7 @@ export function build_daily_pick_prompt({
       local_relevance_score: candidate_relevance_scores
         ? Number(candidate_relevance_scores[candidate_index].toFixed(3))
         : null,
+      age_in_days: candidate_paper.age_in_days,
     })
   );
 
@@ -79,6 +63,7 @@ export function build_daily_pick_prompt({
     `Their current goal: ${reading_intent_line}`,
     "",
     "local_relevance_score (0-1, null on cold start) comes from a recommender trained on papers they previously finished versus dismissed. Treat it as a strong prior, but override it when a paper clearly matches or clashes with the stated interests and goal.",
+    "Prefer newer papers; an older paper must clearly beat newer ones on relevance.",
     "",
     "Candidate papers, one JSON object per line:",
     ...candidate_lines,

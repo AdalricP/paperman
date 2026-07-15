@@ -4,18 +4,17 @@ import { join } from "node:path";
 
 export const default_settings = {
   tracked_arxiv_category_codes: ["physics", "cs.RO", "cs.LG"],
-  papers_per_category_per_day: 3,
+  papers_per_category_per_day: 10,
   interests_blurb_text: "",
   reading_intent_blurb_text: "",
   openrouter_api_key: "",
   openrouter_chat_model_id: "deepseek/deepseek-v4-flash",
-  fireworks_api_key: "",
-  fireworks_embedding_model_id: "fireworks/qwen3-embedding-8b",
   has_completed_first_run_setup: false,
 };
 
 const maximum_marked_papers_kept_in_history = 1000;
 const maximum_marked_papers_kept_with_embedding_vectors = 400;
+const maximum_candidate_pool_age_in_days = 21;
 
 export function paperman_home_directory_path() {
   return process.env.PAPERMAN_HOME || join(homedir(), ".paperman");
@@ -37,6 +36,17 @@ export function pruned_mark_history(marked_papers_by_arxiv_id) {
   return Object.fromEntries(kept_entries);
 }
 
+export function pruned_candidate_pool(candidate_papers_by_arxiv_id, current_date_iso) {
+  const current_date = new Date(`${current_date_iso}T12:00:00Z`);
+  return Object.fromEntries(
+    Object.entries(candidate_papers_by_arxiv_id).filter(([, pooled_paper]) => {
+      const first_seen_date = new Date(`${pooled_paper.first_seen_date_iso}T12:00:00Z`);
+      const age_in_days = Math.floor((current_date - first_seen_date) / 86_400_000);
+      return Number.isFinite(age_in_days) && age_in_days <= maximum_candidate_pool_age_in_days;
+    })
+  );
+}
+
 export function open_paperman_home_files(home_directory_path) {
   const conf_store_named = (store_name) =>
     new Conf({ cwd: home_directory_path, configName: store_name, projectName: "paperman" });
@@ -44,6 +54,7 @@ export function open_paperman_home_files(home_directory_path) {
   const settings_store = conf_store_named("settings");
   const daily_selection_store = conf_store_named("daily_selection");
   const mark_history_store = conf_store_named("mark_history");
+  const candidate_pool_store = conf_store_named("candidate_pool");
 
   const read_mark_history = () => mark_history_store.get("marked_papers_by_arxiv_id", {});
 
@@ -71,6 +82,17 @@ export function open_paperman_home_files(home_directory_path) {
       const marked_papers_by_arxiv_id = { ...read_mark_history() };
       delete marked_papers_by_arxiv_id[arxiv_id];
       mark_history_store.set("marked_papers_by_arxiv_id", marked_papers_by_arxiv_id);
+    },
+    read_candidate_pool: () => candidate_pool_store.get("papers_by_arxiv_id", {}),
+    write_candidate_pool: (candidate_papers_by_arxiv_id, current_date_iso) => {
+      candidate_pool_store.clear();
+      candidate_pool_store.set("papers_by_arxiv_id", pruned_candidate_pool(candidate_papers_by_arxiv_id, current_date_iso));
+    },
+    reset_all: () => {
+      settings_store.clear();
+      daily_selection_store.clear();
+      mark_history_store.clear();
+      candidate_pool_store.clear();
     },
   };
 }

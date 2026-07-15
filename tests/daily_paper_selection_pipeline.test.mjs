@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  candidate_pool_after_merging_fetched_papers,
   daily_paper_selection_for_date,
   merged_papers_across_feeds,
   sanitized_papers_per_category_per_day,
@@ -172,7 +173,7 @@ test("cross-listed papers merge their category codes across feeds", () => {
   assert.deepEqual(merged_papers[0].arxiv_category_codes, ["cs.LG", "cs.RO"]);
 });
 
-test("force regeneration on the same day carries over marks for surviving papers", async () => {
+test("force regeneration excludes papers already frozen for the day", async () => {
   const existing_daily_selection = {
     selection_date_iso: "2026-07-15",
     selected_papers: [feed_paper("2607.00001", "cs.LG")],
@@ -180,13 +181,14 @@ test("force regeneration on the same day carries over marks for surviving papers
   };
   const { dependencies } = in_memory_pipeline_dependencies({ existing_daily_selection });
   const { daily_selection } = await daily_paper_selection_for_date({ ...dependencies, force_regeneration: true });
-  assert.deepEqual(daily_selection.mark_by_arxiv_id, { "2607.00001": "completed" });
+  assert.deepEqual(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id), ["2607.00002"]);
+  assert.deepEqual(daily_selection.mark_by_arxiv_id, {});
 });
 
-test("papers per category sanitizes to a positive whole number with a default of three", () => {
-  assert.equal(sanitized_papers_per_category_per_day(undefined), 3);
-  assert.equal(sanitized_papers_per_category_per_day("nonsense"), 3);
-  assert.equal(sanitized_papers_per_category_per_day(0), 3);
+test("papers per category sanitizes to a positive whole number with a default of ten", () => {
+  assert.equal(sanitized_papers_per_category_per_day(undefined), 10);
+  assert.equal(sanitized_papers_per_category_per_day("nonsense"), 10);
+  assert.equal(sanitized_papers_per_category_per_day(0), 10);
   assert.equal(sanitized_papers_per_category_per_day("5"), 5);
   assert.equal(sanitized_papers_per_category_per_day(2), 2);
 });
@@ -201,4 +203,23 @@ test("selection targets never exceed the available candidates per category", () 
     "cs.LG": 2,
     "cs.RO": 1,
   });
+});
+
+test("candidate pool keeps the earliest first-seen date while refreshing paper metadata", () => {
+  const merged_candidate_papers_by_arxiv_id = candidate_pool_after_merging_fetched_papers({
+    existing_candidate_papers_by_arxiv_id: {
+      "2607.00001": { ...feed_paper("2607.00001", "cs.LG"), title: "Older title", first_seen_date_iso: "2026-07-01" },
+    },
+    fetched_candidate_papers: [{ ...feed_paper("2607.00001", "cs.LG"), title: "Corrected title" }],
+    current_date_iso: "2026-07-15",
+  });
+  assert.equal(merged_candidate_papers_by_arxiv_id["2607.00001"].title, "Corrected title");
+  assert.equal(merged_candidate_papers_by_arxiv_id["2607.00001"].first_seen_date_iso, "2026-07-01");
+});
+
+test("model prompt receives paper age and an explicit newer-paper preference", async () => {
+  const { call_log, dependencies } = in_memory_pipeline_dependencies();
+  await daily_paper_selection_for_date(dependencies);
+  assert.match(call_log.pick_prompts[0], /"age_in_days":0/);
+  assert.match(call_log.pick_prompts[0], /Prefer newer papers/);
 });

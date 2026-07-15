@@ -1,3 +1,4 @@
+import "./environment_variables.mjs";
 import { similarity } from "ml-distance";
 import natural from "natural";
 

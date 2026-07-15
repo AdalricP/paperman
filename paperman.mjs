@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // αριανός
 
-import dotenv from "dotenv";
+import "./source/environment_variables.mjs";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import readline from "node:readline";
 import { fetch_arxiv_papers_for_category } from "./source/arxiv_paper_feed.mjs";
-import { embed_paper_texts, request_daily_pick } from "./source/model_provider_api.mjs";
+import { embed_paper_texts } from "./source/local_paper_embeddings.mjs";
+import { request_daily_pick } from "./source/model_provider_api.mjs";
 import { daily_paper_selection_for_date } from "./source/daily_paper_selection_pipeline.mjs";
 import { google_calendar_event_link, next_full_hour_at_least_minutes_away } from "./source/google_calendar_event_link.mjs";
 import { open_paperman_home_files, paperman_home_directory_path } from "./source/paperman_home_files.mjs";
+import { expanded_category_group_codes_after_toggle, initial_expanded_category_group_codes } from "./source/category_tree_model.mjs";
 import {
   arxiv_id_after_selection_move,
   build_paper_list_rows,
@@ -36,7 +37,6 @@ const maximum_rendered_line_width = 400;
 const reading_session_duration_in_minutes = 60;
 const minimum_minutes_before_reading_session = 60;
 const abstract_characters_shown_in_calendar_details = 400;
-const add_custom_category_setting_key = "add_custom_category";
 
 const ansi_reset = "\x1b[0m";
 const ansi_bold = "\x1b[1m";
@@ -51,9 +51,6 @@ const category_code_style = "\x1b[38;2;229;192;123m";
 const completed_glyph_style = "\x1b[38;2;120;220;120m";
 const crossed_out_glyph_style = "\x1b[38;2;255;110;110m";
 const warning_style = "\x1b[38;2;255;110;110m";
-
-dotenv.config({ path: ".env", quiet: true });
-dotenv.config({ path: join(paperman_home_directory_path(), ".env"), quiet: true });
 
 const home_files = open_paperman_home_files(paperman_home_directory_path());
 
@@ -71,21 +68,19 @@ const user_interface_state = {
   settings_rows: [],
   settings_cursor_index: 0,
   settings_scroll_offset: 0,
+  expanded_category_group_codes: initial_expanded_category_group_codes(home_files.read_settings().tracked_arxiv_category_codes),
   text_input: null,
   status_message: null,
   is_regenerating: false,
   have_tracked_categories_changed: false,
   is_inside_alternate_screen: false,
+  is_hard_reset_confirmation_pending: false,
 };
 
 function current_date_iso() {
   const fake_today_iso = process.env.PAPERMAN_FAKE_TODAY?.trim();
   if (fake_today_iso) return fake_today_iso;
   return new Date().toLocaleDateString("en-CA");
-}
-
-function fireworks_api_key_in_use() {
-  return process.env.FIREWORKS_API_KEY?.trim() || user_interface_state.settings.fireworks_api_key;
 }
 
 function openrouter_api_key_in_use() {
@@ -110,13 +105,10 @@ async function generate_daily_selection({ force_regeneration }) {
     read_daily_selection: home_files.read_daily_selection,
     write_daily_selection: home_files.write_daily_selection,
     read_mark_history: home_files.read_mark_history,
+    read_candidate_pool: home_files.read_candidate_pool,
+    write_candidate_pool: home_files.write_candidate_pool,
     fetch_papers_for_category: fetch_arxiv_papers_for_category,
-    embed_texts: (paper_texts) =>
-      embed_paper_texts({
-        fireworks_api_key: fireworks_api_key_in_use(),
-        fireworks_embedding_model_id: settings.fireworks_embedding_model_id,
-        paper_texts,
-      }),
+    embed_texts: embed_paper_texts,
     request_pick: (prompt_text) =>
       request_daily_pick({
         openrouter_api_key: openrouter_api_key_in_use(),
@@ -145,13 +137,12 @@ function apply_daily_selection_result({ daily_selection, warnings }) {
 function save_settings_changes(settings_changes) {
   home_files.write_settings(settings_changes);
   user_interface_state.settings = home_files.read_settings();
-  user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings);
+  user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings, user_interface_state.expanded_category_group_codes);
 }
 
 function completed_setup_wizard() {
   user_interface_state.setup_wizard = initial_setup_wizard_state({
     environment_openrouter_api_key: process.env.OPENROUTER_API_KEY?.trim(),
-    environment_fireworks_api_key: process.env.FIREWORKS_API_KEY?.trim(),
   });
   user_interface_state.active_screen = "setup_wizard";
   render();
@@ -217,11 +208,7 @@ function open_reading_session_calendar_link() {
 }
 
 function backfill_missing_embedding_vector(paper) {
-  const embedding_request = embed_paper_texts({
-    fireworks_api_key: fireworks_api_key_in_use(),
-    fireworks_embedding_model_id: user_interface_state.settings.fireworks_embedding_model_id,
-    paper_texts: [`${paper.title}\n\n${paper.abstract_text}`],
-  });
+  const embedding_request = embed_paper_texts([`${paper.title}\n\n${paper.abstract_text}`]);
   embedding_request
     .then(([embedding_vector]) => {
       paper.abstract_embedding_vector = embedding_vector;
@@ -354,15 +341,21 @@ function render_settings_row(row, terminal_column_count, is_under_cursor) {
   if (row.type === "category_checkbox") {
     const is_tracked = user_interface_state.settings.tracked_arxiv_category_codes.includes(row.arxiv_category_code);
     const checkbox_glyph = is_tracked ? "[x]" : "[ ]";
-    if (is_under_cursor) return `   ${ansi_inverse}${ansi_bold} ${checkbox_glyph} ${row.label} ${ansi_reset}`;
-    return `    ${checkbox_glyph} ${row.label}`;
+    const indentation_prefix = "  ".repeat(row.indentation_level ?? 0);
+    if (is_under_cursor) return `   ${ansi_inverse}${ansi_bold} ${indentation_prefix}${checkbox_glyph} ${row.label} ${ansi_reset}`;
+    return `    ${indentation_prefix}${checkbox_glyph} ${row.label}`;
   }
 
-  if (row.type === "add_custom_category_action") {
-    const is_editing_this_row = user_interface_state.text_input?.setting_key === add_custom_category_setting_key;
-    if (is_editing_this_row) return render_active_text_input("new code", terminal_column_count);
-    if (is_under_cursor) return `   ${ansi_inverse}${ansi_bold} [+] ${row.label} ${ansi_reset}`;
-    return `    ${ansi_dim}[+] ${row.label}${ansi_reset}`;
+  if (row.type === "category_group") {
+    const expansion_glyph = row.is_expanded ? "[-]" : "[+]";
+    if (is_under_cursor) return `   ${ansi_inverse}${ansi_bold} ${expansion_glyph} ${row.label} ${ansi_reset}`;
+    return `    ${ansi_dim}${expansion_glyph} ${row.label}${ansi_reset}`;
+  }
+
+  if (row.type === "hard_reset_action") {
+    const confirmation_text = user_interface_state.is_hard_reset_confirmation_pending ? "press again to confirm hard reset" : row.label;
+    if (is_under_cursor) return `   ${ansi_inverse}${ansi_bold} ! ${confirmation_text} ${ansi_reset}`;
+    return `    ${warning_style}! ${confirmation_text}${ansi_reset}`;
   }
 
   const setting_value_text = rendered_text_setting_value(row);
@@ -424,7 +417,7 @@ function render_paper_list_screen() {
 
   const reason_text = selected_paper()?.language_model_selection_reason ?? "";
   const reason_footer_line = ` ${ansi_dim}${fit_text_to_width(reason_text ? `↳ ${reason_text}` : "", Math.max(8, terminal_column_count - 2)).trimEnd()}${ansi_reset}`;
-  const key_hints = "↑↓ · enter open · c done · x skip · g calendar · s settings · r refresh · q";
+  const key_hints = "↑↓ · enter open · c done · x skip · g calendar · → settings · r refresh · q";
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${key_hints}${ansi_reset}`;
   write_screen_frame(lines, [reason_footer_line, hints_footer_line]);
 }
@@ -450,7 +443,7 @@ function render_settings_screen() {
   }
 
   const editing_hints = "type · ←→ move · enter save · esc cancel";
-  const browsing_hints = "↑↓ move · space toggle/edit · s/esc back";
+  const browsing_hints = "↑↓ move · space toggle/edit · ← back";
   const hints_footer_line = ` ${ansi_dim}${footer_status_text()}${user_interface_state.text_input ? editing_hints : browsing_hints}${ansi_reset}`;
   write_screen_frame(lines, ["", hints_footer_line]);
 }
@@ -499,9 +492,15 @@ function render_setup_wizard_row(row, terminal_column_count) {
   if (row.type === "wizard_category_option") {
     const checkbox_glyph = row.is_tracked ? "[x]" : "[ ]";
     if (row.is_under_cursor) {
-      return `${render_wizard_child_prefix(row.is_under_last_step)}${ansi_inverse}${ansi_bold} ${checkbox_glyph} ${row.option_label} ${ansi_reset}`;
+      return `${render_wizard_child_prefix(row.is_under_last_step)}${ansi_inverse}${ansi_bold} ${"  ".repeat(row.indentation_level ?? 0)}${checkbox_glyph} ${row.label} ${ansi_reset}`;
     }
-    return `${render_wizard_child_prefix(row.is_under_last_step)} ${checkbox_glyph} ${row.option_label}`;
+    return `${render_wizard_child_prefix(row.is_under_last_step)} ${"  ".repeat(row.indentation_level ?? 0)}${checkbox_glyph} ${row.label}`;
+  }
+
+  if (row.type === "wizard_category_group") {
+    const expansion_glyph = row.is_expanded ? "[-]" : "[+]";
+    if (row.is_under_cursor) return `${render_wizard_child_prefix(row.is_under_last_step)}${ansi_inverse}${ansi_bold} ${expansion_glyph} ${row.label} ${ansi_reset}`;
+    return `${render_wizard_child_prefix(row.is_under_last_step)} ${ansi_dim}${expansion_glyph} ${row.label}${ansi_reset}`;
   }
 
   if (row.type === "wizard_continue_option") {
@@ -574,7 +573,8 @@ function render() {
 }
 
 function open_settings_screen() {
-  user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings);
+  user_interface_state.expanded_category_group_codes = initial_expanded_category_group_codes(user_interface_state.settings.tracked_arxiv_category_codes);
+  user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings, user_interface_state.expanded_category_group_codes);
   user_interface_state.settings_cursor_index = nearest_interactive_settings_row_index(user_interface_state.settings_rows, 0);
   user_interface_state.active_screen = "settings";
 }
@@ -593,15 +593,31 @@ function toggle_tracked_category(arxiv_category_code) {
 }
 
 function begin_editing_settings_row(row) {
+  if (row.type === "category_group") {
+    user_interface_state.expanded_category_group_codes = expanded_category_group_codes_after_toggle(user_interface_state.expanded_category_group_codes, row.archive_code);
+    user_interface_state.settings_rows = build_settings_rows(user_interface_state.settings, user_interface_state.expanded_category_group_codes);
+    user_interface_state.settings_cursor_index = nearest_interactive_settings_row_index(user_interface_state.settings_rows, user_interface_state.settings_cursor_index);
+    return;
+  }
   if (row.type === "category_checkbox") {
     toggle_tracked_category(row.arxiv_category_code);
     return;
   }
-  if (row.type === "add_custom_category_action") {
-    user_interface_state.text_input = {
-      setting_key: add_custom_category_setting_key,
-      editor_state: text_editor_state_for({ setting_key: add_custom_category_setting_key, initial_text: "" }),
-    };
+  if (row.type === "hard_reset_action") {
+    if (!user_interface_state.is_hard_reset_confirmation_pending) {
+      user_interface_state.is_hard_reset_confirmation_pending = true;
+      user_interface_state.status_message = "press again to confirm hard reset";
+      return;
+    }
+    home_files.reset_all();
+    user_interface_state.settings = home_files.read_settings();
+    user_interface_state.daily_selection = null;
+    user_interface_state.paper_list_rows = [];
+    user_interface_state.warnings = [];
+    user_interface_state.is_hard_reset_confirmation_pending = false;
+    user_interface_state.status_message = null;
+    completed_setup_wizard();
+    user_interface_state.setup_wizard_completion_resolver = () => regenerate_daily_selection();
     return;
   }
   user_interface_state.text_input = {
@@ -612,10 +628,6 @@ function begin_editing_settings_row(row) {
 
 function commit_text_input(editor_state) {
   const committed_text = editor_state.draft_text.trim();
-  if (editor_state.setting_key === add_custom_category_setting_key) {
-    if (committed_text) toggle_tracked_category(committed_text);
-    return;
-  }
   if (editor_state.setting_key === "papers_per_category_per_day") {
     const parsed_count = Number.parseInt(committed_text, 10);
     if (!Number.isInteger(parsed_count) || parsed_count < 1) {
@@ -654,7 +666,7 @@ function handle_settings_key(pressed_key) {
   if (pressed_key.name === "space" || pressed_key.name === "return") {
     begin_editing_settings_row(rows[user_interface_state.settings_cursor_index]);
   }
-  if (pressed_key.name === "s" || pressed_key.name === "escape" || pressed_key.name === "q") close_settings_screen();
+  if (pressed_key.name === "left" || pressed_key.name === "s" || pressed_key.name === "escape" || pressed_key.name === "q") close_settings_screen();
 }
 
 function handle_paper_list_key(pressed_key) {
@@ -669,7 +681,7 @@ function handle_paper_list_key(pressed_key) {
   if (pressed_key.name === "c") toggle_mark_on_selected_paper("completed");
   if (pressed_key.name === "x") toggle_mark_on_selected_paper("crossed_out");
   if (pressed_key.name === "g") open_reading_session_calendar_link();
-  if (pressed_key.name === "s") open_settings_screen();
+  if (pressed_key.name === "right" || pressed_key.name === "s") open_settings_screen();
   if (pressed_key.name === "r") regenerate_daily_selection();
 }
 

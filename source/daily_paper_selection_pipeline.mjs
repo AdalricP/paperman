@@ -10,12 +10,15 @@ import {
 
 const maximum_candidate_papers_considered = 600;
 const minimum_candidates_per_category_sent_to_language_model = 8;
+const relevance_score_weight = 0.8;
+const recency_score_weight = 0.2;
+const recency_score_full_age_in_days = 14;
 
 const embedding_text_of_paper = (paper) => `${paper.title}\n\n${paper.abstract_text}`;
 
 export function sanitized_papers_per_category_per_day(papers_per_category_per_day) {
   const parsed_count = Number.parseInt(papers_per_category_per_day, 10);
-  if (!Number.isInteger(parsed_count) || parsed_count < 1) return 3;
+  if (!Number.isInteger(parsed_count) || parsed_count < 1) return 10;
   return parsed_count;
 }
 
@@ -77,11 +80,39 @@ async function fetched_candidate_papers({ tracked_arxiv_category_codes, fetch_pa
   return { candidate_papers, announcement_date_iso, feed_warnings };
 }
 
+function age_in_days_since_first_seen(first_seen_date_iso, current_date_iso) {
+  const first_seen_date = new Date(`${first_seen_date_iso}T12:00:00Z`);
+  const current_date = new Date(`${current_date_iso}T12:00:00Z`);
+  return Math.max(0, Math.floor((current_date - first_seen_date) / 86_400_000));
+}
+
+export function candidate_pool_after_merging_fetched_papers({ existing_candidate_papers_by_arxiv_id, fetched_candidate_papers, current_date_iso }) {
+  const candidate_papers_by_arxiv_id = { ...existing_candidate_papers_by_arxiv_id };
+  for (const fetched_candidate_paper of fetched_candidate_papers) {
+    const existing_pooled_paper = candidate_papers_by_arxiv_id[fetched_candidate_paper.arxiv_id];
+    candidate_papers_by_arxiv_id[fetched_candidate_paper.arxiv_id] = {
+      ...fetched_candidate_paper,
+      first_seen_date_iso: existing_pooled_paper?.first_seen_date_iso ?? current_date_iso,
+    };
+  }
+  return candidate_papers_by_arxiv_id;
+}
+
+function candidate_papers_with_recency({ candidate_papers_by_arxiv_id, current_date_iso, excluded_arxiv_ids }) {
+  return Object.values(candidate_papers_by_arxiv_id)
+    .filter((candidate_paper) => !excluded_arxiv_ids.has(candidate_paper.arxiv_id))
+    .map((candidate_paper) => {
+      const age_in_days = age_in_days_since_first_seen(candidate_paper.first_seen_date_iso, current_date_iso);
+      return { ...candidate_paper, age_in_days, recency_score: Math.max(0, 1 - age_in_days / recency_score_full_age_in_days) };
+    });
+}
+
 function training_history_from_marks(marked_papers_by_arxiv_id) {
   const marked_papers = Object.values(marked_papers_by_arxiv_id);
   const marked_papers_of_kind = (mark_kind) => marked_papers.filter((marked_paper) => marked_paper.mark_kind === mark_kind);
-  const embedding_vectors_of = (papers_of_kind) =>
-    papers_of_kind.map((marked_paper) => marked_paper.abstract_embedding_vector).filter(Boolean);
+  const embedding_vectors_of = (papers_of_kind) => papers_of_kind
+    .map((marked_paper) => marked_paper.abstract_embedding_vector)
+    .filter((embedding_vector) => Array.isArray(embedding_vector) && embedding_vector.length > 0);
   const training_text_of = (marked_paper) => `${marked_paper.title}\n\n${marked_paper.abstract_text}`;
 
   const completed_papers = marked_papers_of_kind("completed");
@@ -95,8 +126,9 @@ function training_history_from_marks(marked_papers_by_arxiv_id) {
   };
 }
 
-async function embedding_vectors_or_warning({ candidate_papers, embed_texts }) {
+async function embedding_vectors_or_warning({ candidate_papers, embed_texts, report_progress }) {
   try {
+    report_progress("embedding candidates locally… first use downloads the model once");
     const embedding_vectors = await embed_texts(candidate_papers.map(embedding_text_of_paper));
     return { embedding_vectors, embedding_warning: null };
   } catch (embedding_error) {
@@ -111,13 +143,27 @@ function embedding_vector_map(papers, embedding_vectors) {
 
 function embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history }) {
   if (!embedding_vectors) return null;
+  const expected_embedding_dimension_count = embedding_vectors[0]?.length;
+  if (!expected_embedding_dimension_count) return null;
+  const matching_embedding_vectors = (embedding_vectors_to_filter) =>
+    embedding_vectors_to_filter.filter((embedding_vector) => embedding_vector.length === expected_embedding_dimension_count);
   const raw_affinity_scores = embedding_affinity_scores({
     candidate_embedding_vectors: embedding_vectors,
-    completed_embedding_vectors: training_history.completed_embedding_vectors,
-    crossed_out_embedding_vectors: training_history.crossed_out_embedding_vectors,
+    completed_embedding_vectors: matching_embedding_vectors(training_history.completed_embedding_vectors),
+    crossed_out_embedding_vectors: matching_embedding_vectors(training_history.crossed_out_embedding_vectors),
   });
   if (!raw_affinity_scores) return null;
   return min_max_normalized_scores(raw_affinity_scores);
+}
+
+function papers_ranked_by_recency(candidate_papers) {
+  return [...candidate_papers].sort((first_paper, second_paper) => second_paper.recency_score - first_paper.recency_score);
+}
+
+function blended_relevance_and_recency_scores(relevance_scores, candidate_papers) {
+  return relevance_scores.map((relevance_score, paper_index) =>
+    relevance_score_weight * relevance_score + recency_score_weight * candidate_papers[paper_index].recency_score
+  );
 }
 
 function pruned_by_category({ ordered_papers, ordered_relevance_scores, papers_per_category_per_day }) {
@@ -142,13 +188,14 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
   const is_cold_start = training_history.total_mark_count === 0;
   if (is_cold_start) {
     const { pruned_papers } = pruned_by_category({
-      ordered_papers: candidate_papers,
+      ordered_papers: papers_ranked_by_recency(candidate_papers),
       ordered_relevance_scores: null,
       papers_per_category_per_day,
     });
     const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({
       candidate_papers: pruned_papers,
       embed_texts,
+      report_progress,
     });
     return {
       pruned_papers,
@@ -159,7 +206,7 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
   }
 
   report_progress(`scoring ${candidate_papers.length} candidates against ${training_history.total_mark_count} past marks…`);
-  const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({ candidate_papers, embed_texts });
+  const { embedding_vectors, embedding_warning } = await embedding_vectors_or_warning({ candidate_papers, embed_texts, report_progress });
 
   const normalized_embedding_scores = embedding_scores_when_available({ candidate_papers, embedding_vectors, training_history });
   const bayes_probabilities = bayes_completed_probabilities({
@@ -168,13 +215,16 @@ async function locally_ranked_candidates({ candidate_papers, training_history, e
     crossed_out_texts: training_history.crossed_out_texts,
   });
   const relevance_scores = blended_relevance_scores({ normalized_embedding_scores, bayes_probabilities });
+  const relevance_scores_including_recency = relevance_scores
+    ? blended_relevance_and_recency_scores(relevance_scores, candidate_papers)
+    : null;
 
-  const ranked_entries = relevance_scores
-    ? papers_ranked_by_relevance_score({ papers: candidate_papers, relevance_scores })
-    : candidate_papers.map((paper) => ({ paper, relevance_score: null }));
+  const ranked_entries = relevance_scores_including_recency
+    ? papers_ranked_by_relevance_score({ papers: candidate_papers, relevance_scores: relevance_scores_including_recency })
+    : papers_ranked_by_recency(candidate_papers).map((paper) => ({ paper, relevance_score: null }));
   const { pruned_papers, pruned_relevance_scores } = pruned_by_category({
     ordered_papers: ranked_entries.map((ranked_entry) => ranked_entry.paper),
-    ordered_relevance_scores: relevance_scores ? ranked_entries.map((ranked_entry) => ranked_entry.relevance_score) : null,
+    ordered_relevance_scores: relevance_scores_including_recency ? ranked_entries.map((ranked_entry) => ranked_entry.relevance_score) : null,
     papers_per_category_per_day,
   });
 
@@ -295,6 +345,8 @@ export async function daily_paper_selection_for_date({
   read_daily_selection,
   write_daily_selection,
   read_mark_history,
+  read_candidate_pool = () => ({}),
+  write_candidate_pool = () => {},
   fetch_papers_for_category,
   embed_texts,
   request_pick,
@@ -313,7 +365,22 @@ export async function daily_paper_selection_for_date({
     fetch_papers_for_category,
     marked_arxiv_ids: new Set(Object.keys(marked_papers_by_arxiv_id)),
   });
-  if (candidate_papers.length === 0) {
+  const currently_selected_arxiv_ids = new Set(existing_daily_selection?.selected_papers?.map((selected_paper) => selected_paper.arxiv_id) ?? []);
+  const candidate_papers_by_arxiv_id = candidate_pool_after_merging_fetched_papers({
+    existing_candidate_papers_by_arxiv_id: read_candidate_pool(),
+    fetched_candidate_papers: candidate_papers,
+    current_date_iso,
+  });
+  const pooled_candidate_papers = candidate_papers_with_recency({
+    candidate_papers_by_arxiv_id,
+    current_date_iso,
+    excluded_arxiv_ids: new Set([...Object.keys(marked_papers_by_arxiv_id), ...currently_selected_arxiv_ids]),
+  });
+  const round_robin_candidate_papers = papers_in_round_robin_across_categories({
+    papers: pooled_candidate_papers,
+    maximum_count: maximum_candidate_papers_considered,
+  });
+  if (round_robin_candidate_papers.length === 0) {
     throw new Error("No unmarked papers in any tracked feed today");
   }
 
@@ -321,7 +388,7 @@ export async function daily_paper_selection_for_date({
   const training_history = training_history_from_marks(marked_papers_by_arxiv_id);
   const { pruned_papers, pruned_relevance_scores, embedding_vector_by_arxiv_id, scoring_warnings } =
     await locally_ranked_candidates({
-      candidate_papers,
+      candidate_papers: round_robin_candidate_papers,
       training_history,
       embed_texts,
       papers_per_category_per_day,
@@ -348,6 +415,11 @@ export async function daily_paper_selection_for_date({
     previous_marks_by_arxiv_id: is_frozen_for_today ? existing_daily_selection.mark_by_arxiv_id ?? {} : {},
   });
   write_daily_selection(daily_selection);
+  const selected_arxiv_ids = new Set(daily_selection.selected_papers.map((selected_paper) => selected_paper.arxiv_id));
+  const unselected_unmarked_candidate_papers_by_arxiv_id = Object.fromEntries(
+    Object.entries(candidate_papers_by_arxiv_id).filter(([arxiv_id]) => !selected_arxiv_ids.has(arxiv_id) && !marked_papers_by_arxiv_id[arxiv_id])
+  );
+  write_candidate_pool(unselected_unmarked_candidate_papers_by_arxiv_id, current_date_iso);
 
   return {
     daily_selection,

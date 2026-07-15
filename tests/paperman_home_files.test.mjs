@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { default_settings, open_paperman_home_files, pruned_mark_history } from "../source/paperman_home_files.mjs";
+import { default_settings, open_paperman_home_files, pruned_candidate_pool, pruned_mark_history } from "../source/paperman_home_files.mjs";
 
 const with_scratch_home_files = (run_with_home_files) => {
   const scratch_home_directory_path = mkdtempSync(join(tmpdir(), "paperman-test-"));
@@ -76,4 +76,12 @@ test("pruning caps history at 1000 marks and embeddings at the newest 400", () =
   assert.equal(marks_with_embeddings.length, 400);
   const newest_mark = pruned_marked_papers.find((marked_paper) => marked_paper.arxiv_id === "2607.01199");
   assert.ok(newest_mark.abstract_embedding_vector);
+});
+
+test("candidate pool drops papers older than twenty-one days", () => {
+  const pruned_candidate_papers_by_arxiv_id = pruned_candidate_pool({
+    recent: { arxiv_id: "recent", first_seen_date_iso: "2026-07-01" },
+    stale: { arxiv_id: "stale", first_seen_date_iso: "2026-06-23" },
+  }, "2026-07-15");
+  assert.deepEqual(Object.keys(pruned_candidate_papers_by_arxiv_id), ["recent"]);
 });
