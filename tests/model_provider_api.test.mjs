@@ -63,7 +63,9 @@ test("prompt retains titles and shortens only long abstracts", () => {
 test("OpenRouter requests enable medium reasoning without returning it in JSON", async () => {
   const original_fetch = globalThis.fetch;
   let request_payload;
+  let captured_request_options;
   globalThis.fetch = async (_endpoint_url, request_options) => {
+    captured_request_options = request_options;
     request_payload = JSON.parse(request_options.body);
     return { ok: true, json: async () => ({ choices: [{ message: { content: '{"selected_papers":[]}' } }] }) };
   };
@@ -75,6 +77,7 @@ test("OpenRouter requests enable medium reasoning without returning it in JSON",
     });
     assert.equal(response_text, '{"selected_papers":[]}');
     assert.deepEqual(request_payload.reasoning, { effort: "medium", exclude: true });
+    assert.equal(captured_request_options.signal, undefined);
   } finally {
     globalThis.fetch = original_fetch;
   }

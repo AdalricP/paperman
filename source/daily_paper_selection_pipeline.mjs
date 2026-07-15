@@ -119,7 +119,7 @@ function papers_ranked_by_recency(candidate_papers) {
 }
 
 function pruned_by_category({ ordered_papers, papers_per_category_per_day }) {
-  const per_category_cap = Math.max(minimum_candidates_per_category_sent_to_language_model, papers_per_category_per_day * 4);
+  const per_category_cap = Math.max(minimum_candidates_per_category_sent_to_language_model, papers_per_category_per_day * 2);
   const kept_count_by_category = new Map();
   const pruned_papers = [];
 

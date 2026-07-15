@@ -60,7 +60,7 @@ how other papers are ranked.
 2. Crossed-out papers never reappear. All remaining candidates are ordered by
    recency before the OpenRouter picker considers their title, abstract,
    interests, and goal.
-3. The top candidates per category go to the chat model (default
+3. Up to twice the daily quota of top candidates per category go to the chat model (default
    `deepseek/deepseek-v4-flash` via OpenRouter) with your category, interests
    blurb, and goal. Each category request launches in parallel and reports when
    it is ready; the model picks the final N per category — "papers per category"

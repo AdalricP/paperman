@@ -116,6 +116,20 @@ test("the per-category quota caps how many papers each category contributes", as
   assert.deepEqual(selected_counts, { "cs.LG": 2, "cs.RO": 1 });
 });
 
+test("model considers at most twice each category quota", async () => {
+  const { call_log, dependencies } = in_memory_pipeline_dependencies({
+    papers_by_category: {
+      "cs.LG": Array.from({ length: 25 }, (_unused, paper_index) => feed_paper(`2607.500${paper_index}`, "cs.LG")),
+    },
+    papers_per_category_per_day: 10,
+  });
+  await daily_paper_selection_for_date(dependencies);
+  const prompt_candidates = call_log.pick_prompts[0]
+    .split("\n")
+    .filter((prompt_line) => prompt_line.startsWith('{"arxiv_id"'));
+  assert.equal(prompt_candidates.length, 20);
+});
+
 test("crossed-out papers are excluded from candidates", async () => {
   const { dependencies } = in_memory_pipeline_dependencies({
     marked_papers_by_arxiv_id: {
