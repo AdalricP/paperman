@@ -50,7 +50,7 @@ const in_memory_pipeline_dependencies = ({
   papers_per_category_per_day = undefined,
   request_pick,
 } = {}) => {
-  const call_log = { fetched_categories: [], pick_prompts: [], written_daily_selections: [] };
+  const call_log = { fetched_categories: [], pick_prompts: [], progress_messages: [], written_daily_selections: [] };
   return {
     call_log,
     dependencies: {
@@ -75,7 +75,7 @@ const in_memory_pipeline_dependencies = ({
         call_log.pick_prompts.push(prompt_text);
         return (request_pick ?? quota_honoring_request_pick)(prompt_text);
       },
-      report_progress: () => {},
+      report_progress: (progress_message) => call_log.progress_messages.push(progress_message),
     },
   };
 };
@@ -171,6 +171,46 @@ test("a model response missing one category slot is completed in recency order",
   assert.equal(daily_selection.selected_papers.length, 2);
   assert.match(daily_selection.selected_papers[1].language_model_selection_reason, /complete the category quota/);
   assert.deepEqual(warnings, []);
+});
+
+test("category model requests launch together and report readiness independently", async () => {
+  let release_slow_category;
+  let report_both_categories_started;
+  const both_categories_started = new Promise((resolve) => {
+    report_both_categories_started = resolve;
+  });
+  const started_category_codes = [];
+  const { call_log, dependencies } = in_memory_pipeline_dependencies({
+    papers_by_category: {
+      "cs.LG": [feed_paper("2607.30001", "cs.LG"), feed_paper("2607.30002", "cs.LG")],
+      "cs.RO": [feed_paper("2607.40001", "cs.RO"), feed_paper("2607.40002", "cs.RO")],
+    },
+    request_pick: (prompt_text) => {
+      const category_code = prompt_text.match(/Tracked arXiv categories: ([^\n]+)/)[1];
+      started_category_codes.push(category_code);
+      if (started_category_codes.length === 2) report_both_categories_started();
+      if (category_code === "cs.LG") {
+        return new Promise((resolve) => {
+          release_slow_category = () => quota_honoring_request_pick(prompt_text).then(resolve);
+        });
+      }
+      return quota_honoring_request_pick(prompt_text);
+    },
+  });
+
+  const selection_promise = daily_paper_selection_for_date(dependencies);
+  await both_categories_started;
+  assert.deepEqual(started_category_codes, ["cs.LG", "cs.RO"]);
+  assert.match(call_log.pick_prompts[0], /Tracked arXiv categories: cs\.LG/);
+  assert.doesNotMatch(call_log.pick_prompts[0], /cs\.RO/);
+  assert.match(call_log.pick_prompts[1], /Tracked arXiv categories: cs\.RO/);
+  assert.doesNotMatch(call_log.pick_prompts[1], /cs\.LG/);
+
+  release_slow_category();
+  const { daily_selection } = await selection_promise;
+  assert.equal(daily_selection.selected_papers.length, 4);
+  assert.match(call_log.progress_messages.join("\n"), /cs\.RO ready \(1\/2\)/);
+  assert.match(call_log.progress_messages.join("\n"), /cs\.LG ready \(2\/2\)/);
 });
 
 test("cross-listed papers merge their category codes across feeds", () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   build_daily_pick_prompt,
+  request_daily_pick,
   total_selection_target,
   validate_daily_pick_response,
 } from "../source/model_provider_api.mjs";
@@ -42,6 +43,41 @@ test("prompt marks missing blurbs without a feedback score", () => {
   });
   assert.match(prompt_text, /Their interests: \(not provided\)/);
   assert.doesNotMatch(prompt_text, /local_relevance_score/);
+});
+
+test("prompt retains titles and shortens only long abstracts", () => {
+  const full_title = "A complete title that must not be shortened";
+  const prompt_text = build_daily_pick_prompt({
+    tracked_arxiv_category_codes: ["cs.LG"],
+    interests_blurb_text: "",
+    reading_intent_blurb_text: "",
+    candidate_papers: [{ ...candidate_paper("2607.00001", "cs.LG"), title: full_title, abstract_text: "a".repeat(351) }],
+    selection_target_by_category_code: { "cs.LG": 1 },
+  });
+  const candidate_line = prompt_text.split("\n").find((prompt_line) => prompt_line.startsWith('{"arxiv_id"'));
+  const prompt_candidate = JSON.parse(candidate_line);
+  assert.equal(prompt_candidate.title, full_title);
+  assert.equal(prompt_candidate.abstract.length, 350);
+});
+
+test("OpenRouter requests enable medium reasoning without returning it in JSON", async () => {
+  const original_fetch = globalThis.fetch;
+  let request_payload;
+  globalThis.fetch = async (_endpoint_url, request_options) => {
+    request_payload = JSON.parse(request_options.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: '{"selected_papers":[]}' } }] }) };
+  };
+  try {
+    const response_text = await request_daily_pick({
+      openrouter_api_key: "test-key",
+      openrouter_chat_model_id: "test-model",
+      prompt_text: "test prompt",
+    });
+    assert.equal(response_text, '{"selected_papers":[]}');
+    assert.deepEqual(request_payload.reasoning, { effort: "medium", exclude: true });
+  } finally {
+    globalThis.fetch = original_fetch;
+  }
 });
 
 test("total selection target sums the per-category quotas", () => {

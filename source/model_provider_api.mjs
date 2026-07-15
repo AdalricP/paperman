@@ -1,5 +1,5 @@
 const openrouter_chat_completions_url = "https://openrouter.ai/api/v1/chat/completions";
-const maximum_abstract_characters_sent_to_language_model = 700;
+const maximum_abstract_characters_sent_to_language_model = 350;
 const language_model_sampling_temperature = 0.2;
 const language_model_maximum_output_tokens = 8000;
 const milliseconds_per_second = 1000;
@@ -165,6 +165,7 @@ export async function request_daily_pick({ openrouter_api_key, openrouter_chat_m
       temperature: language_model_sampling_temperature,
       max_tokens: language_model_maximum_output_tokens,
       response_format: { type: "json_object" },
+      reasoning: { effort: "medium", exclude: true },
     },
   });
   const response_text = chat_response?.choices?.[0]?.message?.content;

@@ -61,9 +61,12 @@ how other papers are ranked.
    recency before the OpenRouter picker considers their title, abstract,
    interests, and goal.
 3. The top candidates per category go to the chat model (default
-   `deepseek/deepseek-v4-flash` via OpenRouter) with your categories, interests
-   blurb, and goal; it picks the final N per category — "papers per category"
+   `deepseek/deepseek-v4-flash` via OpenRouter) with your category, interests
+   blurb, and goal. Each category request launches in parallel and reports when
+   it is ready; the model picks the final N per category — "papers per category"
    in settings, default 10 — with a one-line reason each (shown in the footer).
+   Titles and IDs are sent in full; abstracts are locally trimmed to 350
+   characters to keep requests quick.
 4. The result is frozen for the day — re-running paperman shows the same list
    with your marks. `r` forces a fresh pick.
 

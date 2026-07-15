@@ -190,15 +190,16 @@ function picks_completed_from_recency_order({ model_validated_picks, pruned_pape
   return [...model_validated_picks, ...recency_completion_picks];
 }
 
-async function language_model_selection({
+async function language_model_selection_for_category({
   settings,
+  category_code,
   pruned_papers,
   selection_target_by_category_code,
   request_pick,
   report_progress,
 }) {
   const prompt_text = build_daily_pick_prompt({
-    tracked_arxiv_category_codes: settings.tracked_arxiv_category_codes,
+    tracked_arxiv_category_codes: [category_code],
     interests_blurb_text: settings.interests_blurb_text,
     reading_intent_blurb_text: settings.reading_intent_blurb_text,
     candidate_papers: pruned_papers,
@@ -207,7 +208,7 @@ async function language_model_selection({
 
   for (const attempt_number of [1, 2]) {
     try {
-      report_progress(attempt_number === 1 ? "asking the model for today's picks…" : "retrying the model once…");
+      report_progress(attempt_number === 1 ? `${category_code}: asking the model…` : `${category_code}: retrying the model once…`);
       const response_text = await request_pick(prompt_text);
       const model_validated_picks = validated_picks_in_daily_pick_response({
         response_text,
@@ -223,11 +224,49 @@ async function language_model_selection({
       if (attempt_number === 2) {
         return {
           validated_picks: fallback_picks({ pruned_papers, selection_target_by_category_code }),
-          selection_warning: `model pick failed, used recency order: ${selection_error.message}`,
+          selection_warning: `${category_code}: model pick failed, used recency order: ${selection_error.message}`,
         };
       }
     }
   }
+}
+
+async function language_model_selection({
+  settings,
+  pruned_papers,
+  selection_target_by_category_code,
+  request_pick,
+  report_progress,
+}) {
+  const category_selections = Object.entries(selection_target_by_category_code).map(([category_code, selection_target]) => ({
+    category_code,
+    category_papers: pruned_papers.filter((pruned_paper) => pruned_paper.source_feed_category_code === category_code),
+    selection_target_by_category_code: { [category_code]: selection_target },
+  }));
+  let completed_category_count = 0;
+
+  const category_results = await Promise.all(
+    category_selections.map(async (category_selection) => {
+      const category_result = await language_model_selection_for_category({
+        settings,
+        category_code: category_selection.category_code,
+        pruned_papers: category_selection.category_papers,
+        selection_target_by_category_code: category_selection.selection_target_by_category_code,
+        request_pick,
+        report_progress,
+      });
+      completed_category_count += 1;
+      report_progress(`${category_selection.category_code} ready (${completed_category_count}/${category_selections.length})`);
+      return category_result;
+    })
+  );
+
+  return {
+    validated_picks: category_results.flatMap((category_result) => category_result.validated_picks),
+    selection_warnings: category_results.flatMap((category_result) =>
+      category_result.selection_warning ? [category_result.selection_warning] : []
+    ),
+  };
 }
 
 function frozen_daily_selection({
@@ -313,7 +352,7 @@ export async function daily_paper_selection_for_date({
   });
 
   const selection_target_by_category_code = selection_targets_for_candidates({ pruned_papers, papers_per_category_per_day });
-  const { validated_picks, selection_warning } = await language_model_selection({
+  const { validated_picks, selection_warnings } = await language_model_selection({
     settings,
     pruned_papers,
     selection_target_by_category_code,
@@ -337,6 +376,6 @@ export async function daily_paper_selection_for_date({
 
   return {
     daily_selection,
-    warnings: [...feed_warnings, ...(selection_warning ? [selection_warning] : [])],
+    warnings: [...feed_warnings, ...selection_warnings],
   };
 }
